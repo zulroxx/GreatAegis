@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - FIREWORKS_API_KEY=${FIREWORKS_API_KEY}
+      - LOCAL_AMD_URL=${LOCAL_AMD_URL:-http://localhost:8080}
+    env_file:
+      - ./backend/.env
+    volumes:
+      - ./backend:/app
+    restart: unless-stopped
