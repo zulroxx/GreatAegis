@@ -6,9 +6,9 @@
 
 > **GreatAegis** is an unbreachable, post-quantum secure AI gateway designed for enterprises. It protects highly sensitive corporate knowledge bases from the "Harvest Now, Decrypt Later" (HNDL) threat while dynamically routing AI workloads using **AMD Instinct GPUs** and the **Fireworks AI API**.
 
-🔗 **Live Demo URL:** [Insert Vercel Link Here]  
-🎬 **Demo Video:** [Insert YouTube Link Here]  
-📄 **Pitch Deck:** [Link to PDF in docs/ folder]  
+🔗 **Live Demo URL:** [Coming Soon]  
+🎬 **Demo Video:** [Coming Soon]  
+📄 **Pitch Deck:** [Coming Soon]  
 
 ---
 
@@ -48,22 +48,22 @@ Our backend container is optimized to boot in **under 60 seconds** and is built 
 
 ### 1. Backend Setup (AMD Node)
 Navigate to the backend directory, prepare your configuration, and run the container:
-- cd backend
-- cp .env.example .env
+- ```cd backend```
+- ```cp .env.example .env```
 - (Edit your .env file and update your FIREWORKS_API_KEY)
 
 Run using Docker (Recommended for Automated Judging Verification):
 - docker compose up --build -d
 
 Alternative manual execution:
-- pip install -r requirements.txt
-- python main.py
+- ``` pip install -r requirements.txt ```
+- ``` python main.py```
 
 ### 2. Frontend Setup
 Navigate to the frontend folder to serve the UI web panel:
-- cd frontend
-- npm install
-- npm run dev
+- ```cd frontend```
+- ```npm install```
+- ```npm run dev```
 
 ## 🔒 Automated Pre-Screening Compliance
 - [x] **AMD Compute Usage:** Validated via ROCm + AMD Developer Cloud deployment.
