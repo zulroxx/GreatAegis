@@ -30,13 +30,13 @@ Highly regulated industries (Banking, Healthcare, Government) are blocked from a
 ![GreatAegis Architecture](./docs/architecture_diagram.png) 
 ```
 GreatAegis/
-├── frontend/               # Next.js + Tailwind CSS (Client-side PQC decryption)
+├── frontend/               # Vite + React SPA + Tailwind CSS (Client-side PQC decryption)
 ├── backend/                # FastAPI + Hybrid Router logic + ROCm orchestration
 ├── docs/                   # Slide deck and architecture diagrams
-└── docker-compose.yml      # Spins up backend + vector DB in < 60 seconds
+└── docker-compose.yml      # Unified compose file (Frontend on port 3000, Backend on port 8000)
 ```
 ## 💻 Tech Stack
-* **Frontend:** Next.js, Tailwind CSS 
+* **Frontend:** Vite, React, Tailwind CSS 
 * **Backend:** FastAPI (Python), Hybrid Router orchestration
 * **AI / Compute:** AMD ROCm, PyTorch (ROCm build), Fireworks AI API
 * **Database:** Local Vector DB running in the secure pod
@@ -44,26 +44,28 @@ GreatAegis/
 
 ## ⚡ Getting Started (Judging VM / Local Setup)
 
-Our backend container is optimized to boot in **under 60 seconds** and is built for `linux/amd64`.
+Our containers are optimized to boot in **under 60 seconds** and are built for `linux/amd64`.
 
-### 1. Backend Setup (AMD Node)
-Navigate to the backend directory, prepare your configuration, and run the container:
-- ```cd backend```
-- ```cp .env.example .env```
-- (Edit your .env file and update your FIREWORKS_API_KEY)
+### Unified Docker Deployment (Recommended)
+1. Navigate to the backend directory and set your environment variables:
+   - `cd backend`
+   - `cp .env.example .env`
+   - *(Edit your `.env` file and update your `FIREWORKS_API_KEY`)*
+2. Return to the root directory and spin up both services:
+   - `cd ..`
+   - `docker-compose up --build -d`
+3. Access the dashboard at **http://localhost:3000** (Backend runs on **http://localhost:8000**).
 
-Run using Docker (Recommended for Automated Judging Verification):
-- docker compose up --build -d
+### Manual Setup (Alternative)
+**Backend:**
+- `cd backend`
+- `pip install -r requirements.txt`
+- `python main.py`
 
-Alternative manual execution:
-- ``` pip install -r requirements.txt ```
-- ``` python main.py```
-
-### 2. Frontend Setup
-Navigate to the frontend folder to serve the UI web panel:
-- ```cd frontend```
-- ```npm install```
-- ```npm run dev```
+**Frontend:**
+- `cd frontend`
+- `npm install`
+- `npm run dev`
 
 ## 🔒 Automated Pre-Screening Compliance
 - [x] **AMD Compute Usage:** Validated via ROCm + AMD Developer Cloud deployment.
