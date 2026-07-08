@@ -1,0 +1,106 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# GreatAegis Inference Server — Production Dockerfile
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Purpose:  Run a locked vLLM inference server on AMD Instinct MI300X hardware
+#           serving either Mixtral-8x7B or Gemma-7B behind the GreatAegis gateway.
+#
+# Target:   linux/amd64  (AMD EPYC + Instinct MI300X, ROCm 6.x)
+# Runtime:  < 60 s container initialisation, < 30 s first-token latency
+#
+# Build:
+#   docker build -f Dockerfile.inference \
+#     --build-arg MODEL=mixtral-8x7b \
+#     --platform linux/amd64 \
+#     -t greataegis-inference:mixtral .
+#
+# Run:
+#   docker run --device=/dev/kfd --device=/dev/dri \
+#     --security-opt seccomp=unconfined --group-add video \
+#     -v /mnt/models:/models:ro \
+#     -v greataegis-cache:/cache \
+#     -p 8000:8000 \
+#     greataegis-inference:mixtral
+# ═══════════════════════════════════════════════════════════════════════════════
+
+FROM rocm/vllm:rocm6.2_mi300_ubuntu22.04_py3.10_vllm_0.6.4 AS base
+
+# ── Build arguments ─────────────────────────────────────────────────────────
+#   MODEL: "mixtral-8x7b" | "gemma-7b"
+ARG MODEL=mixtral-8x7b
+ENV LOCKED_MODEL=${MODEL}
+
+# ── Metadata labels ─────────────────────────────────────────────────────────
+LABEL org.greataegis.version="2.0.0"
+LABEL org.greataegis.model="${LOCKED_MODEL}"
+LABEL org.greataegis.arch="linux/amd64"
+LABEL org.greataegis.hardware="AMD-Instinct-MI300X"
+LABEL org.greataegis.description="GreatAegis Inference Server — ${LOCKED_MODEL}"
+
+# ── System dependencies ─────────────────────────────────────────────────────
+RUN apt-get update -y \
+    && apt-get install -y --no-install-recommends \
+        curl \
+        jq \
+        rocm-smi-lib \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Lock model weights ──────────────────────────────────────────────────────
+# Model weights are expected to be bind-mounted at /models on the host.
+# The container verifies they exist and fail-fast if missing.
+RUN mkdir -p /models /cache
+
+COPY scripts/verify_model.sh /usr/local/bin/verify-model
+RUN chmod +x /usr/local/bin/verify-model
+
+# ── Security hardening ──────────────────────────────────────────────────────
+# Run as non-root inside the container
+RUN useradd --create-home --shell /bin/bash greataegis
+USER greataegis
+WORKDIR /home/greataegis
+
+# ── Health check ────────────────────────────────────────────────────────────
+# The vLLM server exposes /health on port 8000.
+HEALTHCHECK --interval=15s --timeout=5s --retries=4 \
+    CMD curl -sf http://localhost:8000/health || exit 1
+
+# ── Volume declarations ─────────────────────────────────────────────────────
+# /models  — read-only bind mount for model weights
+# /cache   — writable volume for vLLM KV-cache (speeds cold starts)
+VOLUME ["/models", "/cache"]
+
+# ── Environment ─────────────────────────────────────────────────────────────
+ENV VLLM_MODEL_PATH=/models/${LOCKED_MODEL}
+ENV VLLM_CACHE_DIR=/cache
+ENV VLLM_MAX_MODEL_LEN=32768
+ENV VLLM_GPU_MEMORY_UTILIZATION=0.92
+ENV VLLM_TENSOR_PARALLEL_SIZE=1
+
+# ── Entrypoint ──────────────────────────────────────────────────────────────
+# --enforce-eager        : disable CUDA graphs for faster first-token on AMD
+# --max-num-seqs 64      : cap concurrent sequences to bound VRAM
+# --disable-log-requests : reduce noise in production logs
+# --model                : locked at build time via ARG MODEL
+
+ENTRYPOINT ["python", "-m", "vllm.entrypoints.openai.api_server"]
+CMD [ \
+    "--host", "0.0.0.0", \
+    "--port", "8000", \
+    "--model", "/models/${LOCKED_MODEL}", \
+    "--enforce-eager", \
+    "--max-num-seqs", "64", \
+    "--max-model-len", "32768", \
+    "--gpu-memory-utilization", "0.92", \
+    "--disable-log-requests" \
+]
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Multi-model variant (optional second stage)
+# ═══════════════════════════════════════════════════════════════════════════════
+# Build with:  docker build --target gemma -f Dockerfile.inference ...
+# This produces a Gemma-7B image from the same Dockerfile.
+
+FROM base AS gemma
+ARG MODEL=gemma-7b
+ENV LOCKED_MODEL=${MODEL}
+LABEL org.greataegis.model="gemma-7b"

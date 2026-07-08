@@ -1,6 +1,19 @@
 version: '3.8'
 
 services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    restart: unless-stopped
+    depends_on:
+      - backend
+
   backend:
     build:
       context: ./backend
