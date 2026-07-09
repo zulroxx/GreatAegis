@@ -1,5 +1,4 @@
 import { useState, useCallback } from "react";
-import { Zap } from "lucide-react";
 import ProxyMonitor from "../components/ProxyMonitor";
 import SecurePromptTerminal from "../components/SecurePromptTerminal";
 import HardwareStatusBanner from "../components/HardwareStatusBanner";
@@ -148,6 +147,15 @@ export default function ProxyChat() {
     setIsDemo((prev) => {
       const next = !prev;
       setDemoMode(next ? "casual" : undefined);
+      // Tell the backend to switch between simulated and production mode so
+      // the AMD pod status reflects the real probe result (online/offline)
+      // instead of staying stuck on "simulated".
+      const API_BASE = "http://localhost:8060";
+      fetch(`${API_BASE}/api/v1/gateway/mode?mode=${next ? "simulated" : "production"}`, {
+        method: "POST",
+      }).catch(() => {
+        // Backend may be unreachable — non-critical, health poll will retry
+      });
       return next;
     });
   }, []);
