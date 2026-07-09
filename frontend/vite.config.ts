@@ -6,7 +6,7 @@ import svgr from 'vite-plugin-svgr'
 // Custom plugin to handle ?import&react syntax (alias to ?react)
 const svgImportPlugin = () => ({
   name: 'svg-import-alias',
-  resolveId(id) {
+  resolveId(id: string) {
     // Transform ?import&react to ?react for vite-plugin-svgr
     if (id.includes('?import&react')) {
       return id.replace('?import&react', '?react');
@@ -16,7 +16,7 @@ const svgImportPlugin = () => ({
 });
 
 // https://vite.dev/config/
-export default defineConfig(({ command }) => ({
+export default defineConfig(({ command: _command }) => ({
   plugins: [
     react(),
     tailwindcss(),
@@ -34,7 +34,11 @@ export default defineConfig(({ command }) => ({
     }),
   ],
   server: {
-    allowedHosts: true,
+    // Restrict to localhost/127.0.0.1 in development to prevent DNS rebinding.
+    // Override with GREATAEGIS_ALLOWED_HOSTS env var for remote judging VMs.
+    allowedHosts: process.env.GREATAEGIS_ALLOWED_HOSTS
+      ? process.env.GREATAEGIS_ALLOWED_HOSTS.split(',')
+      : ['localhost', '127.0.0.1'],
     hmr: false,
     port: 3060,
     host: '0.0.0.0'
