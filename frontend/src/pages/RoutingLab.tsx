@@ -20,9 +20,9 @@ import {
 /* ── Constants ──────────────────────────────────────────────────────── */
 
 const RULES = [
-  { label: "Enforce Client-Side ML-KEM/Kyber Key Wrapping", defaultEnabled: true },
-  { label: "Zero-Trust Data-in-Transit Payload Encapsulation", defaultEnabled: true },
-  { label: "Strict Safe-Compute Pod Isolation", defaultEnabled: true },
+  { label: "Enforce Client-Side ML-KEM/Kyber Key Wrapping", description: "OFF disables post-quantum encryption — prompts may route to public endpoints", defaultEnabled: true },
+  { label: "Zero-Trust Data-in-Transit Payload Encapsulation", description: "ON forces ALL traffic through private AMD pods regardless of sensitivity", defaultEnabled: true },
+  { label: "Strict Safe-Compute Pod Isolation", description: "ON blocks automatic fallback to external providers when pods are offline", defaultEnabled: true },
 ];
 
 const ROUTING_PROFILES: { value: RoutingProfile; label: string }[] = [
@@ -343,6 +343,7 @@ export default function RoutingLab() {
                 <div key={rule.label} className="animate-slide-up" style={{ animationDelay: `${idx * 60}ms` }}>
                   <QuantumRuleToggle
                     label={rule.label}
+                    description={rule.description}
                     defaultEnabled={rule.defaultEnabled}
                     onChange={handleStaleToggle}
                   />

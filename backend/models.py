@@ -139,7 +139,7 @@ class HealthResponse(BaseModel):
 
 class ChatRequest(BaseModel):
     prompt: str
-    model: str = "accounts/fireworks/models/gemma-4-26b-a4b-it"
+    model: str = "accounts/fireworks/models/glm-5p2"
     temperature: float = 0.7
     max_tokens: int = 2048
     system_prompt: str | None = None
@@ -153,11 +153,11 @@ class ChatRequest(BaseModel):
 # ── Gateway Chat (autonomous hybrid router decides model) ───────────────────
 
 class GatewayChatRequest(BaseModel):
-    """Chat request that goes through the hybrid router — no model field.
-    The router autonomously selects the target model based on content."""
+    """Chat request that goes through the hybrid router."""
     prompt: str
     temperature: float = 0.7
     max_tokens: int = 2048
+    model: str = "accounts/fireworks/models/glm-5p2"
     system_prompt: str | None = None
     routing_profile: str = "auto"
     client_encryption_flag: bool = False
@@ -193,6 +193,23 @@ class FireworksUsageResponse(BaseModel):
     source: str = "simulated"  # "fireworks_api" | "simulated"
 
 
+class ModelUsageItem(BaseModel):
+    model_id: str
+    model_label: str
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    request_count: int = 0
+    estimated_cost_usd: float = 0.0
+
+
+class ModelUsageResponse(BaseModel):
+    models: list[ModelUsageItem]
+    total_tokens: int = 0
+    total_cost_usd: float = 0.0
+    source: str = "fireworks_api"
+
+
 # ── System Metrics (Real Backend Data) ───────────────────────────────────────
 
 class SystemMetricsResponse(BaseModel):
@@ -206,3 +223,18 @@ class SystemMetricsResponse(BaseModel):
     uptime_hours: float
     python_version: str
     hostname: str
+
+
+# ── API Key Management ────────────────────────────────────────────────────────
+
+class ApiKeyRequest(BaseModel):
+    api_key: str
+
+
+class SettingsPasswordRequest(BaseModel):
+    password: str
+
+
+class ApiKeyStatusResponse(BaseModel):
+    configured: bool
+    key_hint: str = ""  # e.g. "fw_3a...****"

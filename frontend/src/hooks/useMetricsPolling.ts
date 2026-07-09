@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import type { MetricsResponse } from "../types/api";
 
-const API_BASE = "http://localhost:8000";
+const API_BASE = "http://localhost:8060";
 const POLL_INTERVAL = 5000; // 5 seconds
 
 interface UseMetricsPollingResult {

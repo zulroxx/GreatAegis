@@ -1,8 +1,7 @@
 import { useState, useCallback } from "react";
-import { Zap, Terminal, Briefcase } from "lucide-react";
+import { Zap } from "lucide-react";
 import ProxyMonitor from "../components/ProxyMonitor";
 import SecurePromptTerminal from "../components/SecurePromptTerminal";
-import EnterpriseChatWorkspace from "../components/EnterpriseChatWorkspace";
 import HardwareStatusBanner from "../components/HardwareStatusBanner";
 import { classifyPrompt } from "../utils/contentClassifier";
 import type { InspectRequest, InspectResponse } from "../types/api";
@@ -23,7 +22,6 @@ function getQuantumRule(label: string, defaultVal: boolean = true): boolean {
 }
 
 export default function ProxyChat() {
-  const [subView, setSubView] = useState<"terminal" | "workspace">("terminal");
   const [route, setRoute] = useState<"idle" | "public" | "private">("idle");
   const [riskScore, setRiskScore] = useState(0);
   const [classification, setClassification] = useState("public");
@@ -97,7 +95,7 @@ export default function ProxyChat() {
       } else {
         // REAL mode — hit the live backend gateway
         try {
-          const API_BASE = "http://localhost:8000";
+          const API_BASE = "http://localhost:8060";
           const quantumEncryption = getQuantumRule("Enforce Client-Side ML-KEM/Kyber Key Wrapping");
           const zeroTrust = getQuantumRule("Zero-Trust Data-in-Transit Payload Encapsulation");
           const podIsolation = getQuantumRule("Strict Safe-Compute Pod Isolation");
@@ -169,119 +167,65 @@ export default function ProxyChat() {
         </p>
       </div>
 
-      {/* ── Subtle Sub-Navigation Toggle ──────────────────────────── */}
-      <div className="flex items-center gap-1.5">
-        <button
-          onClick={() => setSubView("terminal")}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all duration-150 cursor-pointer active:scale-95 hover:brightness-125"
-          style={{
-            backgroundColor:
-              subView === "terminal"
-                ? "var(--color-accent-glow)"
-                : "transparent",
-            color:
-              subView === "terminal"
-                ? "var(--color-accent)"
-                : "var(--color-text-secondary)",
-            border:
-              subView === "terminal"
-                ? "1px solid rgba(0, 230, 118, 0.3)"
-                : "1px solid transparent",
-            transition: "background-color 150ms, color 150ms, border-color 150ms",
-          }}
-        >
-          <Terminal size={13} />
-          <span>Terminal</span>
-        </button>
-        <button
-          onClick={() => setSubView("workspace")}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all duration-150 cursor-pointer active:scale-95 hover:brightness-125"
-          style={{
-            backgroundColor:
-              subView === "workspace"
-                ? "var(--color-accent-glow)"
-                : "transparent",
-            color:
-              subView === "workspace"
-                ? "var(--color-accent)"
-                : "var(--color-text-secondary)",
-            border:
-              subView === "workspace"
-                ? "1px solid rgba(0, 230, 118, 0.3)"
-                : "1px solid transparent",
-            transition: "background-color 150ms, color 150ms, border-color 150ms",
-          }}
-        >
-          <Briefcase size={13} />
-          <span>Enterprise Workspace</span>
-        </button>
-      </div>
-
-      {subView === "terminal" ? (
-        <>
-          {/* ── Floating Demo Simulation Controller ──────────────── */}
-          {isDemo && (
-            <div className="absolute top-4 right-4 z-50">
-              <button
-                onClick={handleToggleFallback}
-                className="text-[10px] font-mono font-semibold px-2.5 py-1 rounded border cursor-pointer transition-all duration-150 active:scale-95 whitespace-nowrap"
-                style={{
-                  backgroundColor:
-                    demoMode === "fallback"
-                      ? "rgba(221, 107, 32, 0.15)"
-                      : "var(--color-bg-input)",
-                  color:
-                    demoMode === "fallback"
-                      ? "var(--color-warning)"
-                      : "var(--color-text-muted)",
-                  borderColor:
-                    demoMode === "fallback"
-                      ? "var(--color-warning)"
-                      : "var(--color-border-default)",
-                }}
-              >
-                SIMULATE AMD POD CRASH
-              </button>
-            </div>
-          )}
-
-          {/* ── Network & Hardware Status Widget ─────────────────── */}
-          <HardwareStatusBanner
-            inspectResponse={result as InspectResponse | null}
-            demoMode={demoMode}
-            onToggleMode={handleToggleMode}
-          />
-
-          {/* ── Split layout ──────────────────────────────────────── */}
-          <div className="flex flex-col lg:flex-row gap-4" style={{ minHeight: "calc(100vh - 200px)" }}>
-            {/* Left: Proxy Monitor */}
-            <div style={{ flex: 1, minWidth: 0, animationDelay: "0ms" }} className="animate-slide-up">
-              <ProxyMonitor
-                route={route}
-                riskScore={riskScore}
-                classification={classification}
-                demoMode={demoMode}
-              />
-            </div>
-
-            {/* Right: Secure Prompt Terminal */}
-            <div style={{ flex: 1, minWidth: 0, animationDelay: "100ms" }} className="animate-slide-up">
-              <SecurePromptTerminal
-                onSubmit={handleSubmit}
-                loading={loading}
-                result={result as InspectResponse | null}
-                error={error}
-                classification={classification}
-                riskScore={riskScore}
-                demoMode={demoMode}
-                onFileAttach={handleFileAttach}
-              />
-            </div>
-          </div>
-        </>
-      ) : (
-        <EnterpriseChatWorkspace />
+      {/* ── Floating Demo Simulation Controller ──────────────── */}
+      {isDemo && (
+        <div className="absolute top-4 right-4 z-50">
+          <button
+            onClick={handleToggleFallback}
+            className="text-[10px] font-mono font-semibold px-2.5 py-1 rounded border cursor-pointer transition-all duration-150 active:scale-95 whitespace-nowrap"
+            style={{
+              backgroundColor:
+                demoMode === "fallback"
+                  ? "rgba(221, 107, 32, 0.15)"
+                  : "var(--color-bg-input)",
+              color:
+                demoMode === "fallback"
+                  ? "var(--color-warning)"
+                  : "var(--color-text-muted)",
+              borderColor:
+                demoMode === "fallback"
+                  ? "var(--color-warning)"
+                  : "var(--color-border-default)",
+            }}
+          >
+            SIMULATE AMD POD CRASH
+          </button>
+        </div>
       )}
+
+      {/* ── Network & Hardware Status Widget ─────────────────── */}
+      <HardwareStatusBanner
+        inspectResponse={result as InspectResponse | null}
+        demoMode={demoMode}
+        onToggleMode={handleToggleMode}
+      />
+
+      {/* ── Split layout ──────────────────────────────────────── */}
+      <div className="flex flex-col lg:flex-row gap-4" style={{ minHeight: "calc(100vh - 200px)" }}>
+        {/* Left: Proxy Monitor */}
+        <div style={{ flex: 1, minWidth: 0, animationDelay: "0ms" }} className="animate-slide-up">
+          <ProxyMonitor
+            route={route}
+            riskScore={riskScore}
+            classification={classification}
+            demoMode={demoMode}
+          />
+        </div>
+
+        {/* Right: Secure Prompt Terminal */}
+        <div style={{ flex: 1, minWidth: 0, animationDelay: "100ms" }} className="animate-slide-up">
+          <SecurePromptTerminal
+            onSubmit={handleSubmit}
+            loading={loading}
+            result={result as InspectResponse | null}
+            error={error}
+            classification={classification}
+            riskScore={riskScore}
+            demoMode={demoMode}
+            onFileAttach={handleFileAttach}
+          />
+        </div>
+      </div>
     </div>
   );
 }

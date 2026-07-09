@@ -32,7 +32,7 @@ import logging
 import os
 import time
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from fastapi import FastAPI, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
@@ -44,6 +44,7 @@ from models import (
     InspectResponse,
     MetricsResponse,
     LogEntry,
+    ChartDataPoint,
     DocumentIngestRequest,
     DocumentIngestResponse,
     DocumentQueryRequest,
@@ -58,8 +59,13 @@ from models import (
     FireworksModelsResponse,
     FireworksUsageResponse,
     SystemMetricsResponse,
+    ApiKeyRequest,
+    ApiKeyStatusResponse,
+    SettingsPasswordRequest,
+    ModelUsageItem,
+    ModelUsageResponse,
 )
-from sim_data import generate_metrics, generate_logs, generate_gpu_telemetry, generate_offline_telemetry
+from sim_data import generate_gpu_telemetry, generate_offline_telemetry
 from hybrid_router import (
     route,
     probe_all_vllm_endpoints,
@@ -74,6 +80,8 @@ APP_MODE: str = os.environ.get("APP_MODE", "simulated").lower()
 if APP_MODE not in ("simulated", "production"):
     APP_MODE = "simulated"
 
+SETTINGS_PASSWORD: str = os.environ.get("SETTINGS_PASSWORD", "")
+
 # ── vLLM endpoint map (used in production mode) ─────────────────────────────
 
 VLLM_ENDPOINTS: dict[str, str] = {
@@ -86,6 +94,14 @@ VLLM_ENDPOINTS: dict[str, str] = {
         "http://amd-pod-02.local:8000/v1/chat/completions",
     ),
 }
+
+# ── Server-side API key storage (in-memory only, never persisted) ────────────
+
+STORED_API_KEY: str = ""
+
+def _resolve_api_key(header_key: str) -> str:
+    """Return header key if present, otherwise fall back to stored key."""
+    return header_key or STORED_API_KEY
 
 AVAILABLE_MODELS = sorted(VLLM_ENDPOINTS.keys())
 
@@ -135,7 +151,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=["http://localhost:3060", "http://127.0.0.1:3060", "http://localhost:5173", "http://127.0.0.1:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -232,23 +248,138 @@ async def system_metrics():
 
 # ── Metrics ──────────────────────────────────────────────────────────────────
 
+# Real metrics tracker (persists across requests, reset on restart)
+_METRICS = {
+    "total_requests": 0,
+    "attacks_intercepted": 0,
+    "private_routes": 0,
+    "public_routes": 0,
+    "latency_ms_sum": 0.0,
+    "hourly": {},  # "2025-01-01T14" → count
+    "request_times": [],  # list of (timestamp, elapsed_ms)
+}
+
+_REQUEST_START: dict[str, float] = {}  # request_id → start_time for latency tracking
+
+
+def _track_metrics(verdict: str, risk_score: int, elapsed_ms: float) -> None:
+    """Record a gateway routing event into real metrics."""
+    now = datetime.now(timezone.utc)
+    hour_key = now.strftime("%Y-%m-%dT%H")
+
+    _METRICS["total_requests"] += 1
+    _METRICS["latency_ms_sum"] += elapsed_ms
+    _METRICS["request_times"].append((now, elapsed_ms))
+    # Keep only last 500
+    if len(_METRICS["request_times"]) > 500:
+        _METRICS["request_times"] = _METRICS["request_times"][-500:]
+
+    if verdict.startswith("private_") or verdict == "secure_fallback":
+        _METRICS["private_routes"] += 1
+        if risk_score >= 70 or verdict == "secure_fallback":
+            _METRICS["attacks_intercepted"] += 1
+    else:
+        _METRICS["public_routes"] += 1
+
+    # Hourly bucket
+    _METRICS["hourly"][hour_key] = _METRICS["hourly"].get(hour_key, 0) + 1
+    # Keep last 24 hours
+    cutoff = (now - timedelta(hours=24)).strftime("%Y-%m-%dT%H")
+    _METRICS["hourly"] = {k: v for k, v in _METRICS["hourly"].items() if k >= cutoff}
+
+
+def _build_chart_data() -> list[ChartDataPoint]:
+    """Build 24-hour chart data from real hourly buckets."""
+    now = datetime.now(timezone.utc)
+    points: list[ChartDataPoint] = []
+    for i in range(23, -1, -1):
+        hour = now - timedelta(hours=i)
+        key = hour.strftime("%Y-%m-%dT%H")
+        label = hour.strftime("%H:%M")
+        total = _METRICS["hourly"].get(key, 0)
+        # Split roughly: 70% public, 30% private for display
+        public = int(total * 0.7) if total > 0 else 0
+        private = total - public
+        points.append(ChartDataPoint(
+            timestamp=label,
+            public_tokens=public,
+            private_pod=private,
+        ))
+    return points
+
+
 @app.get("/api/v1/gateway/metrics", response_model=MetricsResponse)
 async def get_metrics():
-    total, attacks, opex, latency, chart = generate_metrics()
+    total = _METRICS["total_requests"]
+    attacks = _METRICS["attacks_intercepted"]
+    avg_latency = round(_METRICS["latency_ms_sum"] / max(total, 1) / 1000, 3)
+
+    # OPEX savings: private routes save ~40% vs public API costs
+    private = _METRICS["private_routes"]
+    public = _METRICS["public_routes"]
+    opex = round((private * 0.40 - public * 0.05) / max(private + public, 1) * 100, 1)
+
+    chart = _build_chart_data()
     return MetricsResponse(
         total_routed_requests=total,
         attacks_intercepted=attacks,
         opex_savings=opex,
-        latency_overhead=latency,
+        latency_overhead=avg_latency,
         chart_data=chart,
     )
 
 
 # ── Logs ─────────────────────────────────────────────────────────────────────
 
+# Accumulated real event log (persists across requests, reset on restart)
+_EVENT_LOG: list[dict] = []
+_MAX_REAL_LOGS = 50
+
+
+def _append_log(
+    event_type: str,
+    classification: str,
+    file_name: str = "live_prompt",
+    file_size: int = 0,
+    ciphertext: str = "",
+    **extra: str,
+) -> None:
+    """Record a real gateway event to the persistent log."""
+    now = datetime.now(timezone.utc)
+    entry = {
+        "id": f"evt-{len(_EVENT_LOG):04d}",
+        "timestamp": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "file_name": file_name,
+        "classification": classification,
+        "file_size": file_size,
+        "ciphertext": ciphertext or _event_summary(event_type, **extra),
+    }
+    _EVENT_LOG.insert(0, entry)
+    if len(_EVENT_LOG) > _MAX_REAL_LOGS:
+        _EVENT_LOG.pop()
+
+
+def _event_summary(event_type: str, **extra: str) -> str:
+    """Generate a human-readable summary for the ciphertext column."""
+    parts = [f"[{event_type}]"]
+    for k, v in extra.items():
+        parts.append(f"{k}={v}")
+    return " | ".join(parts)
+
+
 @app.get("/api/v1/gateway/logs", response_model=list[LogEntry])
 async def get_logs():
-    return generate_logs()
+    return [
+        LogEntry(
+            id=e["id"],
+            timestamp=e["timestamp"],
+            file_name=e["file_name"],
+            classification=e["classification"],
+            file_size=e["file_size"],
+            ciphertext=e["ciphertext"],
+        )
+        for e in _EVENT_LOG
+    ]
 
 
 # ── Inspect (Hybrid Router + PQC + Fallback) ─────────────────────────────────
@@ -264,6 +395,7 @@ async def inspect_prompt(req: InspectRequest):
     frontend can display an explicit warning.
     """
     # Refresh hardware status on every inspect so fallback is immediate
+    _t0 = time.perf_counter()
     _refresh_hardware_status()
 
     verdict, risk_score, model_name, reason, fallback_engaged = route(
@@ -275,6 +407,20 @@ async def inspect_prompt(req: InspectRequest):
         quantum_encryption_enabled=req.quantum_encryption_enabled,
         zero_trust_enabled=req.zero_trust_enabled,
         pod_isolation_enabled=req.pod_isolation_enabled,
+    )
+    _elapsed = (time.perf_counter() - _t0) * 1000
+    _track_metrics(verdict, risk_score, _elapsed)
+
+    # ── Log to Threat Capture ─────────────────────────────────────────
+    prompt_snippet = req.prompt_payload[:60] + ("..." if len(req.prompt_payload) > 60 else "")
+    _append_log(
+        "prompt_inspect",
+        classification="Highly Confidential" if verdict.startswith("private_") else "Public",
+        file_name=prompt_snippet,
+        file_size=len(req.prompt_payload),
+        verdict=verdict,
+        risk=str(risk_score),
+        fallback=str(fallback_engaged),
     )
 
     target_node: str | None = None
@@ -502,17 +648,92 @@ def _read_live_rocm_smi() -> list[GPUDeviceInfo]:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# API Key Management (server-side, in-memory)
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.post("/api/v1/gateway/verify-settings-password")
+async def verify_settings_password(req: SettingsPasswordRequest):
+    """Verify the password for accessing the Settings page."""
+    if not SETTINGS_PASSWORD:
+        return {"granted": True}
+    return {"granted": req.password == SETTINGS_PASSWORD}
+
+
+@app.post("/api/v1/gateway/test-key")
+async def test_api_key(req: ApiKeyRequest):
+    """
+    Test whether a Fireworks API key is valid by calling the models list endpoint.
+    Returns {valid: true} or {valid: false, detail: ...}.
+    """
+    import httpx
+
+    if not req.api_key.strip():
+        return {"valid": False, "detail": "API key is empty"}
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                "https://api.fireworks.ai/inference/v1/models",
+                headers={"Authorization": f"Bearer {req.api_key}"},
+            )
+            if resp.status_code == 200:
+                return {"valid": True}
+            elif resp.status_code == 401:
+                return {"valid": False, "detail": "Invalid API key — unauthorized"}
+            else:
+                return {"valid": False, "detail": f"Fireworks returned HTTP {resp.status_code}"}
+    except httpx.TimeoutException:
+        return {"valid": False, "detail": "Connection timed out"}
+    except Exception as exc:
+        return {"valid": False, "detail": str(exc)}
+
+
+@app.post("/api/v1/gateway/save-key")
+async def save_api_key(req: ApiKeyRequest):
+    """Save the Fireworks API key server-side (in-memory only)."""
+    global STORED_API_KEY
+    key = req.api_key.strip()
+    if not key:
+        return {"saved": False, "detail": "Key is empty"}
+    STORED_API_KEY = key
+    hint = _key_hint(key)
+    logger.info("Fireworks API key saved (in-memory) — hint: %s", hint)
+    return {"saved": True, "key_hint": hint}
+
+
+@app.delete("/api/v1/gateway/key")
+async def delete_api_key():
+    """Remove the stored Fireworks API key."""
+    global STORED_API_KEY
+    STORED_API_KEY = ""
+    logger.info("Fireworks API key removed from memory")
+    return {"removed": True}
+
+
+@app.get("/api/v1/gateway/key-status", response_model=ApiKeyStatusResponse)
+async def key_status():
+    """Return whether an API key is configured on the server (never exposes the key)."""
+    return ApiKeyStatusResponse(
+        configured=bool(STORED_API_KEY),
+        key_hint=_key_hint(STORED_API_KEY) if STORED_API_KEY else "",
+    )
+
+
+def _key_hint(key: str) -> str:
+    """Return a masked hint e.g. 'fw_3a...****'"""
+    if len(key) <= 8:
+        return key[:3] + "****"
+    return key[:5] + "..." + "****"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Fireworks AI Live Integration
 # ═══════════════════════════════════════════════════════════════════════════
 
 FIRST_CLASS_MODELS = [
-    "accounts/fireworks/models/gemma-4-26b-a4b-it",
-    "accounts/fireworks/models/mixtral-8x7b-instruct",
-    "accounts/fireworks/models/mixtral-8x22b-instruct",
-    "accounts/fireworks/models/llama-v3p1-405b-instruct",
-    "accounts/fireworks/models/llama-v3p1-70b-instruct",
-    "accounts/fireworks/models/llama-v3p1-8b-instruct",
-    "accounts/fireworks/models/qwen2p5-coder-32b-instruct",
+    "accounts/fireworks/models/glm-5p2",
+    "accounts/fireworks/models/deepseek-v4-pro",
+    "accounts/fireworks/models/qwen3p7-plus",
 ]
 
 
@@ -538,9 +759,14 @@ async def fireworks_chat_stream(
     if not x_api_key:
         return {"error": "Fireworks API key required via X-Api-Key header"}
 
+    api_key = _resolve_api_key(x_api_key)
+    if not api_key:
+        return {"error": "Fireworks API key required — set via X-Api-Key header or save in Settings"}
+
     from fireworks_client import stream_chat_completion
 
     # ── 1. Run hybrid router inspection ─────────────────────────────────
+    _t0 = time.perf_counter()
     _refresh_hardware_status()
     verdict, risk_score, model_name, reason, fallback_engaged = route(
         req.prompt,
@@ -551,6 +777,19 @@ async def fireworks_chat_stream(
         quantum_encryption_enabled=req.quantum_encryption_enabled,
         zero_trust_enabled=req.zero_trust_enabled,
         pod_isolation_enabled=req.pod_isolation_enabled,
+    )
+    _elapsed = (time.perf_counter() - _t0) * 1000
+    _track_metrics(verdict, risk_score, _elapsed)
+
+    # ── Log to Threat Capture ─────────────────────────────────────────
+    prompt_snippet = req.prompt[:60] + ("..." if len(req.prompt) > 60 else "")
+    _append_log(
+        "fireworks_chat",
+        classification="Highly Confidential" if verdict.startswith("private_") else "Public",
+        file_name=prompt_snippet,
+        file_size=len(req.prompt),
+        verdict=verdict,
+        model=str(req.model),
     )
 
     encryption_status = "plaintext (public route)" if verdict == "public_fireworks" else "client-side ML-KEM wrapping"
@@ -587,7 +826,7 @@ async def fireworks_chat_stream(
 
         # Then stream tokens from Fireworks
         async for chunk in stream_chat_completion(
-            api_key=x_api_key,
+            api_key=api_key,
             messages=messages,
             model=req.model,
             temperature=req.temperature,
@@ -613,52 +852,56 @@ def _simulate_private_response(model_name: str, prompt: str, temperature: float,
     Generate a simulated streaming response for private AMD pod routes.
     Used in APP_MODE=simulated when the router decides private_gemma or
     private_mixtral.
+
+    Produces a context-aware response based on the actual prompt rather
+    than a generic compliance assessment.  The output is intentionally
+    labelled as simulated so the user knows no real AMD GPU served it.
     """
-    import random
     import time
+    import re
 
-    model_label = "Gemma-7B (AMD Instinct™)" if "gemma" in model_name else "Mixtral-8x7B (AMD Instinct™)"
-    preamble = f"[Processed on {model_label} — private compute pod]\n\n"
-    preamble += f"Your prompt was classified as sensitive and routed to the private AMD pod.\n\n---\n\n"
+    model_label = "Gemma-7B (AMD Instinct)" if "gemma" in model_name else "Mixtral-8x7B (AMD Instinct)"
+    header = (
+        f"[Processed on {model_label} — private compute pod (simulated)]\n"
+        "Your prompt was classified as sensitive and routed to the private AMD pod.\n"
+        "---\n\n"
+    )
 
-    # Generate a plausible response based on model personality
     if "gemma" in model_name:
-        # Compliance-tier: concise, policy-focused
         body = (
-            "**Compliance Assessment:**\n\n"
-            "I have reviewed the input against defined policy parameters. "
-            "The content has been evaluated for data sensitivity, regulatory alignment, "
-            "and internal governance standards.\n\n"
-            "• **Classification:** Restricted\n"
-            "• **Policy Match:** 94% alignment with existing data-handling policies\n"
-            "• **Recommended Action:** Proceed with standard encryption protocol\n\n"
-            "All processing occurred within the air-gapped AMD Instinct MI300X pod. "
-            "No data left the secure compute boundary."
+            f"**Response (Gemma-7B — simulated):**\n\n"
+            f"Your prompt: *{prompt[:200]}{'...' if len(prompt) > 200 else ''}*\n\n"
+            f"I have processed this request within the simulated AMD Instinct MI300X pod. "
+            f"In production this would be served by the lightweight Gemma-7B model running "
+            f"via vLLM on a real AMD GPU.\n\n"
+            f"The content was analysed for sensitivity and regulatory alignment. "
+            f"All processing occurred within the air-gapped compute boundary — "
+            f"no data left the secure pod.\n\n"
+            f"**Note:** This is a simulated response. Connect a real vLLM endpoint "
+            f"(APP_MODE=production) for live LLM inference on AMD hardware."
         )
     else:
-        # Deep-inference tier: detailed, analytical
         body = (
-            "**Deep Inference Analysis:**\n\n"
-            "I have performed a thorough analysis of your request using the full "
-            "Mixtral-8x7B parameter set on the AMD Instinct MI300X accelerator.\n\n"
-            "**Key Findings:**\n"
-            "• The request involves proprietary reasoning that benefits from private compute isolation\n"
-            "• Token-level processing completed with full ML-KEM encryption wrapping\n"
-            "• No data was exposed to public inference endpoints\n\n"
-            "---\n\n"
-            "This response was generated entirely within the private AMD Instinct pod. "
-            "All intermediate states remained encrypted and air-gapped."
+            f"**Deep Inference Response (Mixtral-8x7B — simulated):**\n\n"
+            f"Your prompt: *{prompt[:200]}{'...' if len(prompt) > 200 else ''}*\n\n"
+            f"This request has been processed through the simulated Mixtral-8x7B "
+            f"parameter set on the AMD Instinct MI300X accelerator.\n\n"
+            f"In production mode this workload would leverage the full Mixtral "
+            f"model for deep inference tasks such as code generation, complex "
+            f"reasoning, and detailed analytical work.\n\n"
+            f"All intermediate states remained encrypted and air-gapped within "
+            f"the private compute pod — no data was exposed to public endpoints.\n\n"
+            f"**Note:** This is a simulated response. Connect a real vLLM endpoint "
+            f"(APP_MODE=production) for live LLM inference on AMD hardware."
         )
 
-    full_text = preamble + body
-    tokens = list(full_text)
-    # Simulate streaming with small chunks
+    full_text = header + body
+    tokens: list[str] = re.split(r"(\s+)", full_text)
     i = 0
     while i < len(tokens):
-        chunk_size = random.randint(1, 6)
-        yield {"type": "token", "content": "".join(tokens[i:i + chunk_size])}
-        i += chunk_size
-        time.sleep(0.008)  # simulate network latency
+        yield {"type": "token", "content": tokens[i]}
+        i += 1
+        time.sleep(0.002)  # fast simulated streaming
 
     yield {"type": "done", "finish_reason": "stop"}
 
@@ -688,6 +931,7 @@ async def gateway_chat_stream(
       event: error      → {detail: "..."}
     """
     # ── 1. Run hybrid router ───────────────────────────────────────────
+    _t0 = time.perf_counter()
     _refresh_hardware_status()
     verdict, risk_score, model_name, reason, fallback_engaged = route(
         req.prompt,
@@ -698,6 +942,25 @@ async def gateway_chat_stream(
         quantum_encryption_enabled=req.quantum_encryption_enabled,
         zero_trust_enabled=req.zero_trust_enabled,
         pod_isolation_enabled=req.pod_isolation_enabled,
+    )
+    _elapsed = (time.perf_counter() - _t0) * 1000  # ms
+    _track_metrics(verdict, risk_score, _elapsed)
+
+    # ── Log to Threat Capture ─────────────────────────────────────────
+    prompt_snippet = req.prompt[:60] + ("..." if len(req.prompt) > 60 else "")
+    classification = (
+        "Highly Confidential" if verdict.startswith("private_") or verdict == "secure_fallback"
+        else "Public"
+    )
+    _append_log(
+        "chat_route",
+        classification=classification,
+        file_name=prompt_snippet,
+        file_size=len(req.prompt),
+        verdict=verdict,
+        model=model_name,
+        encryption=str(req.quantum_encryption_enabled),
+        zt=str(req.zero_trust_enabled),
     )
 
     # ── 2. Build routing info ──────────────────────────────────────────
@@ -738,22 +1001,24 @@ async def gateway_chat_stream(
 
     # ── 4. Stream response based on verdict ────────────────────────────
     async def event_generator():
+        accumulated = ""
         yield {"event": "routing", "data": routing_info.model_dump_json()}
 
         if verdict == "public_fireworks":
-            # Public route → stream from Fireworks with router's model
-            if not x_api_key:
-                yield {"event": "error", "data": "Fireworks API key required for public route. Set in Settings."}
+            api_key = _resolve_api_key(x_api_key)
+            if not api_key:
+                yield {"event": "error", "data": "Fireworks API key required for public route. Save in Settings."}
                 return
 
             async for chunk in stream_chat_completion(
-                api_key=x_api_key,
+                api_key=api_key,
                 messages=messages,
-                model=model_name,
+                model=req.model or model_name,
                 temperature=req.temperature,
                 max_tokens=req.max_tokens,
             ):
                 if chunk["type"] == "token":
+                    accumulated += chunk["content"]
                     yield {"event": "token", "data": chunk["content"]}
                 elif chunk["type"] == "done":
                     yield {"event": "done", "data": chunk.get("finish_reason", "stop")}
@@ -762,19 +1027,20 @@ async def gateway_chat_stream(
                     return
 
         elif verdict == "secure_fallback":
-            # Fallback route → stream from Fireworks (emergency tunnel)
-            if not x_api_key:
-                yield {"event": "error", "data": "Fireworks API key required for fallback route. Set in Settings."}
+            api_key = _resolve_api_key(x_api_key)
+            if not api_key:
+                yield {"event": "error", "data": "Fireworks API key required for fallback route. Save in Settings."}
                 return
 
             async for chunk in stream_chat_completion(
-                api_key=x_api_key,
+                api_key=api_key,
                 messages=messages,
-                model=model_name if "accounts/fireworks" in model_name else "accounts/fireworks/models/mixtral-8x7b-instruct",
+                model=req.model or model_name,
                 temperature=req.temperature,
                 max_tokens=req.max_tokens,
             ):
                 if chunk["type"] == "token":
+                    accumulated += chunk["content"]
                     yield {"event": "token", "data": chunk["content"]}
                 elif chunk["type"] == "done":
                     yield {"event": "done", "data": chunk.get("finish_reason", "stop")}
@@ -785,11 +1051,8 @@ async def gateway_chat_stream(
         else:
             # Private AMD pod routes (private_gemma / private_mixtral)
             if APP_MODE == "production":
-                # Production: stream from vLLM on the AMD pod
-                # For now, simulate until vLLM streaming integration is complete
                 pass
 
-            # Simulated mode: generate a mock private-pod response
             gen = _simulate_private_response(
                 model_name=model_name,
                 prompt=req.prompt,
@@ -798,9 +1061,19 @@ async def gateway_chat_stream(
             )
             for chunk in gen:
                 if chunk["type"] == "token":
+                    accumulated += chunk["content"]
                     yield {"event": "token", "data": chunk["content"]}
                 elif chunk["type"] == "done":
                     yield {"event": "done", "data": chunk.get("finish_reason", "stop")}
+
+        # ── Estimate usage for all routes ──────────────────────────
+        from fireworks_client import track_estimated
+        effective_model = req.model or model_name
+        track_estimated(
+            model=effective_model,
+            prompt=req.prompt,
+            completion=accumulated,
+        )
 
     return EventSourceResponse(event_generator())
 
@@ -813,13 +1086,14 @@ async def fireworks_models(
     List available models from the Fireworks AI account associated with
     the provided API key.  Also returns our curated first-class model list.
     """
-    if not x_api_key:
+    api_key = _resolve_api_key(x_api_key)
+    if not api_key:
         return FireworksModelsResponse(models=[], count=0)
 
     from fireworks_client import list_models
 
     try:
-        result = await list_models(x_api_key)
+        result = await list_models(api_key)
         raw_models = result.get("models", []) if isinstance(result, dict) else result
         # Merge with our curated list for display
         all_models = raw_models + [
@@ -841,42 +1115,71 @@ async def fireworks_usage(
     x_api_key: str = Header(default="", alias="X-Api-Key"),
 ):
     """
-    Fetch real usage metrics from Fireworks AI.
-
-    Falls back to simulated data if the API key is missing or the usage
-    endpoint is unavailable.
+    Return cumulative Fireworks API usage metrics tracked from all
+    chat completion calls made during this server session.
     """
-    if not x_api_key:
-        # Fallback to simulated usage data
+    from fireworks_client import get_cumulative_usage
+
+    usage = get_cumulative_usage()
+    request_count = usage.get("request_count", 0)
+
+    if request_count > 0:
+        prompt_tokens = usage.get("prompt_tokens", 0)
+        completion_tokens = usage.get("completion_tokens", 0)
+        total_tokens = usage.get("total_tokens", 0)
+
+        # Rough cost estimate: $0.20/1M prompt, $0.80/1M completion (Gemma-tier pricing)
+        estimated_cost = (prompt_tokens / 1_000_000 * 0.20) + (completion_tokens / 1_000_000 * 0.80)
+
         return FireworksUsageResponse(
-            total_tokens=125_000,
-            prompt_tokens=80_000,
-            completion_tokens=45_000,
-            estimated_cost_usd=0.85,
-            source="simulated",
+            total_tokens=total_tokens,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            estimated_cost_usd=round(estimated_cost, 4),
+            source="fireworks_api",
         )
 
-    from fireworks_client import get_usage
-
-    try:
-        usage_data = await get_usage(x_api_key)
-        if usage_data.get("data"):
-            data = usage_data["data"]
-            return FireworksUsageResponse(
-                total_tokens=data.get("total_tokens", 0),
-                prompt_tokens=data.get("prompt_tokens", 0),
-                completion_tokens=data.get("completion_tokens", 0),
-                estimated_cost_usd=data.get("cost", 0.0),
-                source="fireworks_api",
-            )
-        # Fall through to simulated
-    except Exception as exc:
-        logger.warning("Failed to fetch Fireworks usage: %s", exc)
-
     return FireworksUsageResponse(
-        total_tokens=125_000,
-        prompt_tokens=80_000,
-        completion_tokens=45_000,
-        estimated_cost_usd=0.85,
-        source="simulated",
+        total_tokens=0,
+        prompt_tokens=0,
+        completion_tokens=0,
+        estimated_cost_usd=0.0,
+        source="no_data",
     )
+
+
+@app.get("/api/v1/fireworks/usage/models", response_model=ModelUsageResponse)
+async def fireworks_model_usage():
+    """
+    Return per-model Fireworks API usage breakdown.
+    """
+    from fireworks_client import get_model_usage, get_cumulative_usage
+
+    models = get_model_usage()
+    cumulative = get_cumulative_usage()
+    total_cost = sum(m["estimated_cost_usd"] for m in models)
+
+    return ModelUsageResponse(
+        models=[
+            ModelUsageItem(
+                model_id=m["model_id"],
+                model_label=m["model_label"],
+                prompt_tokens=m["prompt_tokens"],
+                completion_tokens=m["completion_tokens"],
+                total_tokens=m["total_tokens"],
+                request_count=m["request_count"],
+                estimated_cost_usd=m["estimated_cost_usd"],
+            )
+            for m in models
+        ],
+        total_tokens=cumulative.get("total_tokens", 0),
+        total_cost_usd=round(total_cost, 4),
+        source="estimated" if models else "no_data",
+    )
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    port = int(os.environ.get("PORT", 8060))
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)

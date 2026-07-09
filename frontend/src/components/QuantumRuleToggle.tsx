@@ -2,6 +2,7 @@ import { useState } from "react";
 
 interface QuantumRuleToggleProps {
   label: string;
+  description?: string;
   defaultEnabled?: boolean;
   onChange?: (enabled: boolean) => void;
 }
@@ -10,6 +11,7 @@ const STORAGE_PREFIX = "great-aegis-quantum-rule-";
 
 export default function QuantumRuleToggle({
   label,
+  description,
   defaultEnabled = true,
   onChange,
 }: QuantumRuleToggleProps) {
@@ -45,18 +47,25 @@ export default function QuantumRuleToggle({
         border: "1px solid var(--color-border-default)",
       }}
     >
-      <div className="flex items-center gap-2.5">
-        {/* Status dot */}
-        <span
-          className={`w-2 h-2 rounded-full transition-all duration-300 ${enabled ? "animate-breathe" : ""}`}
-          style={{
-            backgroundColor: enabled ? "var(--color-success)" : "var(--color-text-muted)",
-            boxShadow: enabled ? `0 0 6px var(--color-success-dim)` : "none",
-          }}
-        />
-        <span className="text-sm font-medium" style={{ color: "var(--color-text-primary)" }}>
-          {label}
-        </span>
+      <div className="flex flex-col gap-0.5 min-w-0 flex-1 mr-3">
+        <div className="flex items-center gap-2.5">
+          {/* Status dot */}
+          <span
+            className={`w-2 h-2 rounded-full transition-all duration-300 shrink-0 ${enabled ? "animate-breathe" : ""}`}
+            style={{
+              backgroundColor: enabled ? "var(--color-success)" : "var(--color-text-muted)",
+              boxShadow: enabled ? `0 0 6px var(--color-success-dim)` : "none",
+            }}
+          />
+          <span className="text-sm font-medium" style={{ color: "var(--color-text-primary)" }}>
+            {label}
+          </span>
+        </div>
+        {description && (
+          <span className="text-xs ml-[22px]" style={{ color: "var(--color-text-muted)" }}>
+            {description}
+          </span>
+        )}
       </div>
 
       {/* Pill toggle */}

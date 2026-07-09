@@ -36,7 +36,7 @@ export default defineConfig(({ command }) => ({
   server: {
     allowedHosts: true,
     hmr: false,
-    port: 3000,
+    port: 3060,
     host: '0.0.0.0'
   },
 }))
