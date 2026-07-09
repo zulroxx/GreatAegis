@@ -10,10 +10,11 @@
 
 export const SENSITIVE_KEYWORDS = [
   "financial", "revenue", "confidential", "secret", "password",
-  "salary", "budget", "q4", "acquisition", "merger", "classified",
+  "salary", "budget", "acquisition", "merger", "classified",
   "trade secret", "non-public", "insider", "proprietary",
   "nda", "embargo", "restricted", "internal only",
-  "forecast", "earnings", "patent", "ip",
+  "forecast", "earnings", "patent",
+  "intellectual property",
 ];
 
 export const COMPLIANCE_KEYWORDS = [
@@ -31,6 +32,15 @@ export const DEEP_INFERENCE_KEYWORDS = [
   "reasoning chain", "step by step", "explain in detail",
   "long form", "research", "report", "strategy",
 ];
+
+function keywordHits(text: string, keywords: string[]): number {
+  let hits = 0;
+  for (const kw of keywords) {
+    const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (new RegExp(`\\b${escaped}\\b`, 'i').test(text)) hits += 1;
+  }
+  return hits;
+}
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -89,7 +99,8 @@ export function computeRiskScore(prompt: string): { score: number; matchedKeywor
   const matchedKeywords: string[] = [];
 
   for (const kw of SENSITIVE_KEYWORDS) {
-    if (lowered.includes(kw)) {
+    const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (new RegExp(`\\b${escaped}\\b`, 'i').test(lowered)) {
       score += 20;
       matchedKeywords.push(kw);
     }
@@ -111,8 +122,8 @@ export function computeRiskScore(prompt: string): { score: number; matchedKeywor
  */
 export function classifyWorkload(prompt: string): WorkloadType {
   const lowered = prompt.toLowerCase();
-  const complianceHits = COMPLIANCE_KEYWORDS.filter((kw) => lowered.includes(kw)).length;
-  const deepHits = DEEP_INFERENCE_KEYWORDS.filter((kw) => lowered.includes(kw)).length;
+  const complianceHits = keywordHits(lowered, COMPLIANCE_KEYWORDS);
+  const deepHits = keywordHits(lowered, DEEP_INFERENCE_KEYWORDS);
 
   if (deepHits >= 2 || (deepHits >= 1 && complianceHits === 0)) {
     return "deep-inference";

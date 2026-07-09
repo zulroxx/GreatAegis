@@ -5,11 +5,23 @@
 
 const SENSITIVE_KEYWORDS = [
   "financial", "revenue", "confidential", "secret", "password",
-  "salary", "budget", "q4", "acquisition", "merger", "classified",
+  "salary", "budget", "acquisition", "merger", "classified",
   "trade secret", "non-public", "insider", "proprietary",
   "nda", "embargo", "restricted", "internal only",
-  "forecast", "earnings", "patent", "ip",
+  "forecast", "earnings", "patent",
+  "intellectual property",
 ];
+
+function keywordHits(text: string, keywords: string[]): number {
+  let hits = 0;
+  for (const kw of keywords) {
+    const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (new RegExp(`\\b${escaped}\\b`, 'i').test(text)) {
+      hits += 1;
+    }
+  }
+  return hits;
+}
 
 export interface ClassificationResult {
   score: number;
@@ -25,12 +37,13 @@ export function classifyPrompt(prompt: string): ClassificationResult {
   let score = 0;
 
   for (const kw of SENSITIVE_KEYWORDS) {
-    if (lowered.includes(kw)) {
+    const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (new RegExp(`\\b${escaped}\\b`, 'i').test(lowered)) {
       score += 20;
     }
   }
 
-  const matchCount = SENSITIVE_KEYWORDS.filter((kw) => lowered.includes(kw)).length;
+  const matchCount = keywordHits(lowered, SENSITIVE_KEYWORDS);
   if (matchCount >= 3) score += 15;
 
   score = Math.min(score, 100);

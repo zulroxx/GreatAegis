@@ -18,6 +18,7 @@ client-side encrypted PQC tunnel to Fireworks AI — instead of throwing a
 from __future__ import annotations
 
 import logging
+import re
 from typing import Literal
 
 import requests
@@ -42,10 +43,11 @@ HardwareStatus = Literal["online", "offline", "simulated"]
 
 _SENSITIVE_KEYWORDS = [
     "financial", "revenue", "confidential", "secret", "password",
-    "salary", "budget", "q4", "acquisition", "merger", "classified",
+    "salary", "budget", "acquisition", "merger", "classified",
     "trade secret", "non-public", "insider", "proprietary",
     "nda", "embargo", "restricted", "internal only",
-    "forecast", "earnings", "patent", "ip",
+    "forecast", "earnings", "patent",
+    "intellectual property",
 ]
 
 # Keywords that indicate the prompt is a compliance / policy / lightweight
@@ -76,6 +78,17 @@ _FALLBACK_REASON = (
     "disruption."
 )
 
+
+def _keyword_hits(text: str, keywords: list[str]) -> int:
+    """Count keyword matches using word-boundary regex to avoid false positives
+    from binary data (e.g. 'ip' matching random bytes in a raw PDF)."""
+    hits = 0
+    for kw in keywords:
+        if re.search(r'\b' + re.escape(kw) + r'\b', text):
+            hits += 1
+    return hits
+
+
 # ── Risk scoring ────────────────────────────────────────────────────────────
 
 def _compute_risk_score(prompt: str) -> int:
@@ -83,9 +96,9 @@ def _compute_risk_score(prompt: str) -> int:
     lowered = prompt.lower()
     score = 0
     for kw in _SENSITIVE_KEYWORDS:
-        if kw in lowered:
+        if re.search(r'\b' + re.escape(kw) + r'\b', lowered):
             score += 20
-    match_count = sum(1 for kw in _SENSITIVE_KEYWORDS if kw in lowered)
+    match_count = _keyword_hits(lowered, _SENSITIVE_KEYWORDS)
     if match_count >= 3:
         score += 15
     return min(score, 100)
@@ -98,8 +111,8 @@ def _classify_workload(prompt: str) -> Literal["compliance", "deep-inference", "
     Classify the prompt workload type to decide between Gemma and Mixtral.
     """
     lowered = prompt.lower()
-    compliance_hits = sum(1 for kw in _COMPLIANCE_KEYWORDS if kw in lowered)
-    deep_hits = sum(1 for kw in _DEEP_INFERENCE_KEYWORDS if kw in lowered)
+    compliance_hits = _keyword_hits(lowered, _COMPLIANCE_KEYWORDS)
+    deep_hits = _keyword_hits(lowered, _DEEP_INFERENCE_KEYWORDS)
 
     if deep_hits >= 2 or (deep_hits >= 1 and deep_hits >= compliance_hits):
         return "deep-inference"
@@ -253,15 +266,18 @@ def route(
             )
 
             if pod_isolation_enabled:
-                # Rule 3: Strict pod isolation blocks all external fallback
+                # Pod isolation is ON but the AMD Pod is not ready.  We still
+                # fall back to Fireworks AI via encrypted tunnel so the user
+                # gets a response, but flag that pod isolation policy was
+                # relaxed for this request.
                 return (
                     "secure_fallback",
                     max(score, 80),
                     "Fireworks AI (Encrypted Tunnel Fallback)",
-                    "STRICT POD ISOLATION POLICY BLOCKED: AMD Private Pod unreachable "
-                    "and fallback to external providers is disabled by pod isolation. "
-                    "Disable pod isolation in Security Suite to allow emergency "
-                    "zero-trust routing via Fireworks AI, or restore AMD pod connectivity.",
+                    "AMD Private Pod is not ready. Sensitive content was routed "
+                    "through an encrypted PQC tunnel to Fireworks AI. Pod isolation "
+                    "policy was bypassed for emergency continuity — restore AMD pod "
+                    "connectivity to resume private processing.",
                     True,
                 )
 
@@ -269,7 +285,9 @@ def route(
                 "secure_fallback",
                 max(score, 80),  # floor at 80 to reflect elevated risk
                 "Fireworks AI (Encrypted Tunnel Fallback)",
-                _FALLBACK_REASON,
+                "AMD Private Pod is not ready. Sensitive content was routed "
+                "through an encrypted PQC tunnel to Fireworks AI as a zero-trust "
+                "fallback. Data remains protected via client-side ML-KEM wrapping.",
                 True,
             )
 
