@@ -418,7 +418,7 @@ export default function HardwareStatusBanner({
           <p style={{ color: "var(--color-text-secondary)", lineHeight: 1.6 }}>
             The GreatAegis API server is not responding. The health endpoint at{" "}
             <code className="font-mono text-[10px]" style={{ color: "var(--color-text-muted)" }}>
-              http://localhost:8000/api/v1/gateway/health
+              http://localhost:8060/api/v1/gateway/health
             </code>{" "}
             could not be reached. Make sure the Python backend is running, then
             switch back to <strong>demo</strong> mode to explore the interface

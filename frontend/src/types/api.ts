@@ -121,6 +121,23 @@ export interface FireworksUsageResponse {
   source: string;
 }
 
+export interface ModelUsageItem {
+  model_id: string;
+  model_label: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  request_count: number;
+  estimated_cost_usd: number;
+}
+
+export interface ModelUsageResponse {
+  models: ModelUsageItem[];
+  total_tokens: number;
+  total_cost_usd: number;
+  source: string;
+}
+
 export interface FireworksModel {
   id: string;
   object: string;
@@ -130,4 +147,19 @@ export interface FireworksModel {
 export interface FireworksModelsResponse {
   models: FireworksModel[];
   count: number;
+}
+
+export interface Conversation {
+  id: string;
+  title: string;
+  messages: ChatMessage[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  routing?: ChatRoutingInfo | null;
 }

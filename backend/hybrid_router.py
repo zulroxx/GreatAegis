@@ -34,7 +34,7 @@ ModelName = Literal[
     "gemma-7b",
     "mixtral-8x7b",
     "Fireworks AI (Encrypted Tunnel Fallback)",
-    "accounts/fireworks/models/gemma-4-26b-a4b-it",
+    "accounts/fireworks/models/glm-5p2",
 ]
 HardwareStatus = Literal["online", "offline", "simulated"]
 
@@ -54,7 +54,7 @@ _COMPLIANCE_KEYWORDS = [
     "compliance", "policy", "audit", "regulation", "gdpr",
     "soc2", "iso27001", "hipaa", "pci", "governance",
     "review", "summarise", "summarize", "classify", "check",
-    "validate", "verify", "moderate", "flag", "screening",
+    "verify", "moderate", "flag", "screening",
     "triage", "routing rule", "cost estimate", "quick",
     "lightweight", "simple query", "faq",
 ]
@@ -101,7 +101,7 @@ def _classify_workload(prompt: str) -> Literal["compliance", "deep-inference", "
     compliance_hits = sum(1 for kw in _COMPLIANCE_KEYWORDS if kw in lowered)
     deep_hits = sum(1 for kw in _DEEP_INFERENCE_KEYWORDS if kw in lowered)
 
-    if deep_hits >= 2 or (deep_hits >= 1 and compliance_hits == 0):
+    if deep_hits >= 2 or (deep_hits >= 1 and deep_hits >= compliance_hits):
         return "deep-inference"
     if compliance_hits >= 1:
         return "compliance"
@@ -211,7 +211,7 @@ def route(
         return (
             "public_fireworks",
             score,
-            "accounts/fireworks/models/gemma-4-26b-a4b-it",
+            "accounts/fireworks/models/glm-5p2",
             "Low-risk content; routed to public Fireworks endpoint via Gemma 4 26B for cost efficiency.",
             False,
         )

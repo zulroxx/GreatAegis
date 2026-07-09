@@ -5,6 +5,7 @@ import GatewayOverview from "./pages/GatewayOverview";
 import SecuritySuite from "./pages/SecuritySuite";
 import ProxyChat from "./pages/ProxyChat";
 import RoutingLab from "./pages/RoutingLab";
+import EnterpriseChatWorkspace from "./components/EnterpriseChatWorkspace";
 import SettingsPage from "./pages/Settings";
 
 const COLLAPSE_KEY = "GREATAEGIS_SIDEBAR_COLLAPSED";
@@ -83,6 +84,7 @@ export default function App() {
             {activeTab === "security" && <SecuritySuite />}
             {activeTab === "proxy" && <ProxyChat />}
             {activeTab === "routing-lab" && <RoutingLab />}
+            {activeTab === "workspace" && <EnterpriseChatWorkspace />}
             {activeTab === "settings" && <SettingsPage />}
           </div>
         </main>

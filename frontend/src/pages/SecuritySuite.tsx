@@ -5,9 +5,9 @@ import useLogsPolling from "../hooks/useLogsPolling";
 import useHealthPolling from "../hooks/useHealthPolling";
 
 const RULES = [
-  { label: "Enforce Client-Side ML-KEM/Kyber Key Wrapping", defaultEnabled: true },
-  { label: "Zero-Trust Data-in-Transit Payload Encapsulation", defaultEnabled: true },
-  { label: "Strict Safe-Compute Pod Isolation", defaultEnabled: true },
+  { label: "Enforce Client-Side ML-KEM/Kyber Key Wrapping", description: "OFF disables post-quantum encryption — prompts may route to public endpoints", defaultEnabled: true },
+  { label: "Zero-Trust Data-in-Transit Payload Encapsulation", description: "ON forces ALL traffic through private AMD pods regardless of sensitivity", defaultEnabled: true },
+  { label: "Strict Safe-Compute Pod Isolation", description: "ON blocks automatic fallback to external providers when pods are offline", defaultEnabled: true },
 ];
 
 function formatSize(bytes: number): string {
@@ -59,7 +59,6 @@ export default function SecuritySuite() {
       else next.add(id);
       return next;
     });
-  });
   };
 
   return (
@@ -140,6 +139,7 @@ export default function SecuritySuite() {
             <div key={rule.label} className="animate-slide-up" style={{ animationDelay: `${idx * 80}ms` }}>
               <QuantumRuleToggle
                 label={rule.label}
+                description={rule.description}
                 defaultEnabled={rule.defaultEnabled}
               />
             </div>
@@ -193,7 +193,7 @@ export default function SecuritySuite() {
                   <th className="text-left font-medium px-4 py-2.5" style={{ color: "var(--color-text-muted)" }}>File Name</th>
                   <th className="text-left font-medium px-4 py-2.5" style={{ color: "var(--color-text-muted)" }}>Classification</th>
                   <th className="text-left font-medium px-4 py-2.5" style={{ color: "var(--color-text-muted)" }}>Size</th>
-                  <th className="text-left font-medium px-4 py-2.5" style={{ color: "var(--color-text-muted)" }}>Ciphertext</th>
+                  <th className="text-left font-medium px-4 py-2.5" style={{ color: "var(--color-text-muted)" }}>Details</th>
                 </tr>
               </thead>
               <tbody>
@@ -231,7 +231,7 @@ export default function SecuritySuite() {
                           }}
                         >
                           <FileSearch size={12} />
-                          {isExpanded ? "Hide" : "Inspect Ciphertext"}
+                           {isExpanded ? "Hide" : "Inspect"}
                         </button>
                       </td>
                     </tr>
@@ -254,7 +254,7 @@ export default function SecuritySuite() {
                   }}
                 >
                   <p className="text-xs mb-1" style={{ color: "var(--color-text-muted)" }}>
-                    ML-KEM Ciphertext (hex)
+                    Event Summary
                   </p>
                   <code
                     className="text-xs leading-relaxed break-all select-all"

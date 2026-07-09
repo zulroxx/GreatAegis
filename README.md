@@ -33,7 +33,7 @@ GreatAegis/
 ├── frontend/               # Vite + React SPA + Tailwind CSS (Client-side PQC decryption)
 ├── backend/                # FastAPI + Hybrid Router logic + ROCm orchestration
 ├── docs/                   # Slide deck and architecture diagrams
-└── docker-compose.yml      # Unified compose file (Frontend on port 3000, Backend on port 8000)
+└── docker-compose.yml      # Unified compose file (Frontend on port 3060, Backend on port 8060)
 ```
 ## 💻 Tech Stack
 * **Frontend:** Vite, React, Tailwind CSS 
@@ -54,7 +54,7 @@ Our containers are optimized to boot in **under 60 seconds** and are built for `
 2. Return to the root directory and spin up both services:
    - `cd ..`
    - `docker-compose up --build -d`
-3. Access the dashboard at **http://localhost:3000** (Backend runs on **http://localhost:8000**).
+3. Access the dashboard at **http://localhost:3060** (Backend runs on **http://localhost:8060**).
 
 ### Manual Setup (Alternative)
 **Backend:**

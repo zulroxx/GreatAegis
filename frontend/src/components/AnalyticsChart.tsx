@@ -57,8 +57,8 @@ export default function AnalyticsChart({ data }: AnalyticsChartProps) {
                 <stop offset="95%" stopColor="#00E676" stopOpacity={0.02} />
               </linearGradient>
               <linearGradient id="gradientPrivate" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#00E676" stopOpacity={0.2} />
-                <stop offset="95%" stopColor="#00E676" stopOpacity={0.02} />
+                <stop offset="5%" stopColor="#00B0FF" stopOpacity={0.25} />
+                <stop offset="95%" stopColor="#00B0FF" stopOpacity={0.02} />
               </linearGradient>
             </defs>
 
@@ -99,12 +99,11 @@ export default function AnalyticsChart({ data }: AnalyticsChartProps) {
               type="monotone"
               dataKey="private_pod"
               name="Private AMD Pod Processing"
-              stroke="#00E676"
+              stroke="#00B0FF"
               strokeWidth={2}
               fill="url(#gradientPrivate)"
-              strokeOpacity={0.6}
               dot={false}
-              activeDot={{ r: 4, fill: "#00E676", stroke: "none" }}
+              activeDot={{ r: 4, fill: "#00B0FF", stroke: "none" }}
             />
           </AreaChart>
         </ResponsiveContainer>

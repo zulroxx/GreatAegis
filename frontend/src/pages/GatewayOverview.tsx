@@ -1,46 +1,46 @@
-import { LayoutDashboard, AlertTriangle, Shield, Activity, ExternalLink, Database, DollarSign, Zap, ServerOff } from "lucide-react";
+import { LayoutDashboard, AlertTriangle, Shield, Activity, ExternalLink, Database, ServerOff, Cpu } from "lucide-react";
 import MetricRibbon from "../components/MetricRibbon";
 import AnalyticsChart from "../components/AnalyticsChart";
 import GPUPanel from "../components/GPUPanel";
 import useMetricsPolling from "../hooks/useMetricsPolling";
 import useHealthPolling from "../hooks/useHealthPolling";
 import { useState, useEffect } from "react";
-import type { FireworksUsageResponse } from "../types/api";
+import type { ModelUsageResponse } from "../types/api";
 
-const API_BASE = "http://localhost:8000";
+const API_BASE = "http://localhost:8060";
+
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
+}
 
 export default function GatewayOverview() {
   const { data, loading, error } = useMetricsPolling();
   const { health, loading: healthLoading, reachable } = useHealthPolling();
 
-  const [fireworksUsage, setFireworksUsage] = useState<FireworksUsageResponse | null>(null);
+  const [modelUsage, setModelUsage] = useState<ModelUsageResponse | null>(null);
   const [usageLoading, setUsageLoading] = useState(false);
 
-  // Fetch Fireworks usage if API key is stored
   useEffect(() => {
-    const key = localStorage.getItem("GREATAEGIS_FIREWORKS_API_KEY");
-    if (!key) return;
-
     let cancelled = false;
     const fetchUsage = async () => {
       setUsageLoading(true);
       try {
-        const res = await fetch(`${API_BASE}/api/v1/fireworks/usage`, {
-          headers: { "X-Api-Key": key },
-        });
+        const res = await fetch(`${API_BASE}/api/v1/fireworks/usage/models`);
         if (res.ok && !cancelled) {
-          const json: FireworksUsageResponse = await res.json();
-          setFireworksUsage(json);
+          const json: ModelUsageResponse = await res.json();
+          setModelUsage(json);
         }
       } catch {
-        // Silently ignore — usage is non-critical
+        // non-critical
       } finally {
         if (!cancelled) setUsageLoading(false);
       }
     };
 
     fetchUsage();
-    const interval = setInterval(fetchUsage, 30_000); // every 30s
+    const interval = setInterval(fetchUsage, 30_000);
     return () => {
       cancelled = true;
       clearInterval(interval);
@@ -49,7 +49,6 @@ export default function GatewayOverview() {
 
   const isOnline = health?.hardware_status === "online" && reachable;
   const isSimulated = health?.hardware_status === "simulated" && reachable;
-  const isOffline = health?.hardware_status === "offline" || !reachable;
   const isUnreachable = !reachable && !healthLoading;
 
   const statusColor = isOnline
@@ -88,14 +87,13 @@ export default function GatewayOverview() {
             border: "1px solid var(--color-border-default)",
           }}
         >
-          {/* AMD Secure Pod */}
           <div className="flex items-center gap-1.5">
             <Shield size={14} style={{ color: "var(--color-text-muted)" }} />
             <span style={{ color: "var(--color-text-muted)" }}>
               AMD Secure Pod:
             </span>
             <span
-              className={`inline-block h-2 w-2 rounded-full`}
+              className="inline-block h-2 w-2 rounded-full"
               style={{
                 backgroundColor: statusColor,
                 transition: "background-color 300ms",
@@ -122,7 +120,6 @@ export default function GatewayOverview() {
 
           <span className="hidden sm:inline" style={{ color: "var(--color-border-light)" }}>|</span>
 
-          {/* vLLM Hub models */}
           <div className="flex items-center gap-1.5">
             <Activity size={14} style={{ color: "var(--color-text-muted)" }} />
             <span style={{ color: "var(--color-text-muted)" }}>
@@ -146,7 +143,6 @@ export default function GatewayOverview() {
 
           <span className="hidden sm:inline" style={{ color: "var(--color-border-light)" }}>|</span>
 
-          {/* App mode */}
           <div className="flex items-center gap-1.5">
             <LayoutDashboard size={13} style={{ color: "var(--color-text-muted)" }} />
             <span style={{ color: "var(--color-text-muted)" }}>
@@ -177,7 +173,7 @@ export default function GatewayOverview() {
           </div>
           <p className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
             The GreatAegis API server is not responding. Make sure it is running on
-            port 8000. Data will appear once the server is detected (retrying every
+            port 8060. Data will appear once the server is detected (retrying every
             5s).
           </p>
         </div>
@@ -192,7 +188,7 @@ export default function GatewayOverview() {
             color: "var(--color-error)",
           }}
         >
-          <AlertTriangle size={16} style={{ color: "var(--color-error)" }} /> Could not reach backend — {error}. Make sure the API server is running on port 8000.
+          <AlertTriangle size={16} style={{ color: "var(--color-error)" }} /> Could not reach backend — {error}. Make sure the API server is running on port 8060.
         </div>
       )}
 
@@ -225,63 +221,111 @@ export default function GatewayOverview() {
             <GPUPanel />
           </div>
 
-          {/* ── Fireworks AI Usage Card ──────────────────────── */}
-          {fireworksUsage && (
-            <div className="animate-slide-up" style={{ animationDelay: "400ms" }}>
+          {/* ── API Usage by Model ──────────────────────────── */}
+          <div className="animate-slide-up" style={{ animationDelay: "400ms" }}>
+            <div
+              className="rounded-lg overflow-hidden"
+              style={{
+                backgroundColor: "var(--color-bg-card)",
+                border: "1px solid var(--color-border-default)",
+              }}
+            >
               <div
-                className="rounded-lg p-5"
-                style={{
-                  backgroundColor: "var(--color-bg-card)",
-                  border: "1px solid var(--color-border-default)",
-                }}
+                className="px-5 py-3 flex items-center justify-between"
+                style={{ borderBottom: "1px solid var(--color-border-default)" }}
               >
-                <h3 className="text-sm font-semibold flex items-center gap-2 mb-4" style={{ color: "var(--color-text-primary)" }}>
+                <h3 className="text-sm font-semibold flex items-center gap-2" style={{ color: "var(--color-text-primary)" }}>
                   <ExternalLink size={15} style={{ color: "var(--color-accent)" }} />
-                  Fireworks AI Usage
+                  API Usage by Model
                   {usageLoading && (
-                    <span className="w-3 h-3 rounded-full border-2 border-t-transparent animate-spin" style={{ borderColor: "var(--color-border-light)", borderTopColor: "var(--color-accent)" }} />
+                    <span className="w-3 h-3 rounded-full border-2 border-t-transparent animate-spin ml-1" style={{ borderColor: "var(--color-border-light)", borderTopColor: "var(--color-accent)" }} />
                   )}
-                  <span className="ml-auto text-[10px] font-normal" style={{ color: "var(--color-text-muted)" }}>
-                    Source: {fireworksUsage.source === "fireworks_api" ? "Live API" : "Estimated"}
-                  </span>
                 </h3>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                  <div className="flex flex-col gap-1">
-                    <div className="flex items-center gap-1.5 text-[10px]" style={{ color: "var(--color-text-muted)" }}>
-                      <Zap size={12} /> Total Tokens
-                    </div>
-                    <span className="text-lg font-bold font-mono" style={{ color: "var(--color-text-primary)" }}>
-                      {fireworksUsage.total_tokens.toLocaleString()}
+                <div className="flex items-center gap-3 text-[10px]" style={{ color: "var(--color-text-muted)" }}>
+                  {modelUsage && modelUsage.total_tokens > 0 && (
+                    <span className="font-mono">
+                      {formatTokens(modelUsage.total_tokens)} total tokens
                     </span>
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <div className="flex items-center gap-1.5 text-[10px]" style={{ color: "var(--color-text-muted)" }}>
-                      <Database size={12} /> Prompt
-                    </div>
-                    <span className="text-lg font-bold font-mono" style={{ color: "var(--color-text-primary)" }}>
-                      {fireworksUsage.prompt_tokens.toLocaleString()}
-                    </span>
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <div className="flex items-center gap-1.5 text-[10px]" style={{ color: "var(--color-text-muted)" }}>
-                      <Activity size={12} /> Completion
-                    </div>
-                    <span className="text-lg font-bold font-mono" style={{ color: "var(--color-text-primary)" }}>
-                      {fireworksUsage.completion_tokens.toLocaleString()}
-                    </span>
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <div className="flex items-center gap-1.5 text-[10px]" style={{ color: "var(--color-text-muted)" }}>
-                      <DollarSign size={12} /> Est. Cost
-                    </div>
-                    <span className="text-lg font-bold font-mono" style={{ color: "var(--color-accent)" }}>
-                      ${fireworksUsage.estimated_cost_usd.toFixed(2)}
-                    </span>
-                  </div>
+                  )}
+                  <span className="font-mono">
+                    {modelUsage?.source === "no_data" ? "No data yet" : "Estimated (~4 chars/token)"}
+                  </span>
                 </div>
               </div>
+
+              {modelUsage && modelUsage.models.length > 0 ? (
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr style={{ borderBottom: "1px solid var(--color-border-default)" }}>
+                      <th className="text-left font-medium px-4 py-2.5" style={{ color: "var(--color-text-muted)" }}>Model</th>
+                      <th className="text-right font-medium px-4 py-2.5" style={{ color: "var(--color-text-muted)" }}>Requests</th>
+                      <th className="text-right font-medium px-4 py-2.5" style={{ color: "var(--color-text-muted)" }}>Prompt</th>
+                      <th className="text-right font-medium px-4 py-2.5" style={{ color: "var(--color-text-muted)" }}>Completion</th>
+                      <th className="text-right font-medium px-4 py-2.5" style={{ color: "var(--color-text-muted)" }}>Total</th>
+                      <th className="text-right font-medium px-4 py-2.5" style={{ color: "var(--color-text-muted)" }}>Cost</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {modelUsage.models.map((m, idx) => (
+                      <tr
+                        key={m.model_id}
+                        className="animate-slide-up"
+                        style={{
+                          borderBottom: "1px solid var(--color-border-default)",
+                          animationDelay: `${idx * 50}ms`,
+                        }}
+                      >
+                        <td className="px-4 py-2.5">
+                          <div className="flex items-center gap-2">
+                            <Cpu size={13} style={{ color: "var(--color-accent)" }} />
+                            <span className="font-medium" style={{ color: "var(--color-text-primary)" }}>
+                              {m.model_label}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-2.5 text-right font-mono" style={{ color: "var(--color-text-secondary)" }}>
+                          {m.request_count}
+                        </td>
+                        <td className="px-4 py-2.5 text-right font-mono" style={{ color: "var(--color-text-secondary)" }}>
+                          {formatTokens(m.prompt_tokens)}
+                        </td>
+                        <td className="px-4 py-2.5 text-right font-mono" style={{ color: "var(--color-text-secondary)" }}>
+                          {formatTokens(m.completion_tokens)}
+                        </td>
+                        <td className="px-4 py-2.5 text-right font-mono font-semibold" style={{ color: "var(--color-text-primary)" }}>
+                          {formatTokens(m.total_tokens)}
+                        </td>
+                        <td className="px-4 py-2.5 text-right font-mono" style={{ color: "var(--color-accent)" }}>
+                          ${m.estimated_cost_usd.toFixed(4)}
+                        </td>
+                      </tr>
+                    ))}
+                    <tr style={{ borderTop: "2px solid var(--color-border-default)" }}>
+                      <td className="px-4 py-2.5 font-medium" style={{ color: "var(--color-text-primary)" }}>
+                        Total
+                      </td>
+                      <td />
+                      <td />
+                      <td />
+                      <td className="px-4 py-2.5 text-right font-mono font-bold" style={{ color: "var(--color-text-primary)" }}>
+                        {formatTokens(modelUsage.total_tokens)}
+                      </td>
+                      <td className="px-4 py-2.5 text-right font-mono font-bold" style={{ color: "var(--color-accent)" }}>
+                        ${modelUsage.total_cost_usd.toFixed(4)}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              ) : (
+                <div className="px-5 py-8 text-center">
+                  <Database size={28} className="mx-auto mb-2" style={{ color: "var(--color-text-muted)" }} />
+                  <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+                    {usageLoading ? "Fetching usage data..." : "No API usage yet — send a prompt to get started."}
+                  </p>
+                </div>
+              )}
             </div>
-          )}
+          </div>
         </>
       ) : (
         <div

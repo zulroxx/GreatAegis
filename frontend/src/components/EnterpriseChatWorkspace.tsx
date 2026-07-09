@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
+import ReactMarkdown from "react-markdown";
 import {
   Send,
   Paperclip,
@@ -6,12 +7,14 @@ import {
   User,
   Shield,
   AlertTriangle,
-  Key,
   CheckCircle2,
+  Copy,
+  Check,
 } from "lucide-react";
-import type { ChatRoutingInfo } from "../types/api";
+import type { ChatRoutingInfo, ChatMessage } from "../types/api";
+import { useChatHistory } from "../contexts/ChatHistoryContext";
 
-const API_BASE = "http://localhost:8000";
+const API_BASE = "http://localhost:8060";
 
 const SUGGESTIONS = [
   "Explain quantum-resistant cryptography in simple terms",
@@ -19,14 +22,6 @@ const SUGGESTIONS = [
   "Summarise the key security considerations for deploying LLMs in production",
 ];
 
-interface Message {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  routing?: ChatRoutingInfo | null;
-}
-
-/* ── Quantum rule helpers ────────────────────────────────────────── */
 const STORAGE_PREFIX = "great-aegis-quantum-rule-";
 
 function getQuantumRule(label: string, defaultVal: boolean = true): boolean {
@@ -39,11 +34,9 @@ function getQuantumRule(label: string, defaultVal: boolean = true): boolean {
   return defaultVal;
 }
 
-/* ── Stream SSE helper (gateway-routed, no model selection) ─────── */
-
 async function streamGatewayChat(
   prompt: string,
-  apiKey: string,
+  model: string,
   onRouting: (info: ChatRoutingInfo) => void,
   onToken: (token: string) => void,
   onDone: () => void,
@@ -58,10 +51,10 @@ async function streamGatewayChat(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Api-Key": apiKey,
       },
       body: JSON.stringify({
         prompt,
+        model,
         temperature: 0.7,
         max_tokens: 2048,
         client_encryption_flag: quantumEncryption,
@@ -96,14 +89,14 @@ async function streamGatewayChat(
       const lines = buffer.split("\n");
       buffer = lines.pop() ?? "";
 
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
+      for (let line of lines) {
+        line = line.replace(/\r$/, "");
+        if (!line) continue;
 
-        if (trimmed.startsWith("event: ")) {
-          currentEvent = trimmed.slice(7).trim();
-        } else if (trimmed.startsWith("data: ")) {
-          const dataStr = trimmed.slice(6).trim();
+        if (line.startsWith("event: ")) {
+          currentEvent = line.slice(7).trim();
+        } else if (line.startsWith("data:")) {
+          const dataStr = line.slice(5).replace(/^ /, "");
 
           switch (currentEvent) {
             case "routing": {
@@ -116,7 +109,7 @@ async function streamGatewayChat(
               break;
             }
             case "token":
-              onToken(dataStr);
+              onToken(dataStr || "\n");
               break;
             case "done":
               onDone();
@@ -125,23 +118,22 @@ async function streamGatewayChat(
               onError(dataStr);
               return;
             default:
-              // Raw SSE data fallback
-              if (dataStr === "[DONE]") {
-                onDone();
-              } else {
-                try {
-                  const parsed = JSON.parse(dataStr);
-                  if (parsed.routing_verdict) {
-                    onRouting(parsed as ChatRoutingInfo);
-                  } else if (parsed.content) {
-                    onToken(parsed.content);
-                  } else if (parsed.finish_reason) {
-                    onDone();
+                if (dataStr === "[DONE]") {
+                  onDone();
+                } else {
+                  try {
+                    const parsed = JSON.parse(dataStr);
+                    if (parsed.routing_verdict) {
+                      onRouting(parsed as ChatRoutingInfo);
+                    } else if (parsed.content) {
+                      onToken(parsed.content || "\n");
+                    } else if (parsed.finish_reason) {
+                      onDone();
+                    }
+                  } catch {
+                    onToken(dataStr || "\n");
                   }
-                } catch {
-                  onToken(dataStr);
                 }
-              }
           }
         }
       }
@@ -159,33 +151,35 @@ async function streamGatewayChat(
   }
 }
 
-/* ── Component ──────────────────────────────────────────────────────── */
-
 export default function EnterpriseChatWorkspace() {
-  const [messages, setMessages] = useState<Message[]>([]);
+  const {
+    conversations,
+    activeConversationId,
+    createConversation,
+    getActiveConversation,
+    updateMessages,
+  } = useChatHistory();
+
+  const activeConv = getActiveConversation();
+  const messages = activeConv?.messages ?? [];
+
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [apiKey, setApiKey] = useState<string>("");
-  const [keyMissing, setKeyMissing] = useState(false);
+  const [keyConnected, setKeyConnected] = useState(false);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  /* ── Load API key from localStorage ──────────────────────────── */
   useEffect(() => {
-    const stored = localStorage.getItem("GREATAEGIS_FIREWORKS_API_KEY");
-    if (stored) {
-      setApiKey(stored);
-      setKeyMissing(false);
-    } else {
-      setKeyMissing(true);
-    }
+    fetch(`${API_BASE}/api/v1/gateway/key-status`)
+      .then((res) => res.json())
+      .then((data) => setKeyConnected(data.configured))
+      .catch(() => {});
   }, []);
 
-  /* ── Scroll to bottom on new messages ─────────────────────────── */
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
@@ -204,47 +198,44 @@ export default function EnterpriseChatWorkspace() {
         handleSend();
       }
     },
-    [input, apiKey, streaming],
+    [input, streaming],
   );
 
-  /* ── Cancel stream ─────────────────────────────────────────────── */
   const cancelStream = useCallback(() => {
     abortRef.current?.abort();
     setStreaming(false);
   }, []);
 
-  /* ── Send prompt (gateway-routed) ───────────────────────────────── */
   const handleSend = useCallback(async () => {
     const trimmed = input.trim();
     if (!trimmed || streaming) return;
 
-    // Check API key
-    const key = apiKey || localStorage.getItem("GREATAEGIS_FIREWORKS_API_KEY") || "";
-    if (!key) {
-      setKeyMissing(true);
-      setError("Set your Fireworks API key in Settings first");
-      return;
-    }
-    setKeyMissing(false);
     setError(null);
 
-    // Add user message
-    const userMsg: Message = {
+    let convId = activeConversationId;
+    if (!convId) {
+      convId = createConversation();
+    }
+
+    const userMsg: ChatMessage = {
       id: `msg-${Date.now()}`,
       role: "user",
       content: trimmed,
     };
 
-    // Add placeholder assistant message
     const assistantId = `msg-${Date.now() + 1}`;
-    const assistantMsg: Message = {
+    const assistantMsg: ChatMessage = {
       id: assistantId,
       role: "assistant",
       content: "",
       routing: null,
     };
 
-    setMessages((prev) => [...prev, userMsg, assistantMsg]);
+    const currentConv = conversations.find((c) => c.id === convId);
+    const baseMessages = currentConv?.messages ?? [];
+    const newMessages = [...baseMessages, userMsg, assistantMsg];
+    updateMessages(convId, newMessages);
+
     setInput("");
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
@@ -254,30 +245,22 @@ export default function EnterpriseChatWorkspace() {
     const abortCtrl = new AbortController();
     abortRef.current = abortCtrl;
 
-    // Read current quantum rule configuration from localStorage
     const quantumEncryption = getQuantumRule("Enforce Client-Side ML-KEM/Kyber Key Wrapping");
     const zeroTrust = getQuantumRule("Zero-Trust Data-in-Transit Payload Encapsulation");
     const podIsolation = getQuantumRule("Strict Safe-Compute Pod Isolation");
+    const model = localStorage.getItem("GREATAEGIS_FIREWORKS_MODEL") || "accounts/fireworks/models/glm-5p2";
 
     let fullContent = "";
 
     await streamGatewayChat(
       trimmed,
-      key,
+      model,
       (routing) => {
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantId ? { ...m, routing } : m,
-          ),
-        );
+        updateMessages(convId, updateMessageById(newMessages, assistantId, (m) => ({ ...m, routing })));
       },
       (token) => {
         fullContent += token;
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantId ? { ...m, content: fullContent } : m,
-          ),
-        );
+        updateMessages(convId, updateMessageById(newMessages, assistantId, (m) => ({ ...m, content: fullContent })));
       },
       () => {
         setStreaming(false);
@@ -285,20 +268,14 @@ export default function EnterpriseChatWorkspace() {
       (err) => {
         setError(err);
         setStreaming(false);
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantId
-              ? { ...m, content: `⚠️ Error: ${err}` }
-              : m,
-          ),
-        );
+        updateMessages(convId, updateMessageById(newMessages, assistantId, (m) => ({ ...m, content: `⚠️ Error: ${err}` })));
       },
       quantumEncryption,
       zeroTrust,
       podIsolation,
       abortCtrl.signal,
     );
-  }, [input, apiKey, streaming]);
+  }, [input, streaming, activeConversationId, conversations, createConversation, updateMessages]);
 
   const handleSuggestionClick = useCallback(
     (suggestion: string) => {
@@ -331,36 +308,33 @@ export default function EnterpriseChatWorkspace() {
           borderBottom: "1px solid var(--color-border-default)",
         }}
       >
-        {/* Left: badges — no model selector */}
         <div className="flex items-center gap-3">
-          {/* Zero-trust badge */}
           <div
             className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium"
             style={{
-              backgroundColor: apiKey
+              backgroundColor: keyConnected
                 ? "var(--color-accent-dim)"
                 : "rgba(221, 107, 32, 0.1)",
               border: `1px solid ${
-                apiKey
+                keyConnected
                   ? "color-mix(in srgb, var(--color-accent) 30%, transparent)"
                   : "rgba(221, 107, 32, 0.4)"
               }`,
-              color: apiKey ? "var(--color-success)" : "var(--color-warning)",
+              color: keyConnected ? "var(--color-success)" : "var(--color-warning)",
             }}
           >
             <span
               className="w-1.5 h-1.5 rounded-full"
               style={{
-                backgroundColor: apiKey
+                backgroundColor: keyConnected
                   ? "var(--color-success)"
                   : "var(--color-warning)",
                 animation: "pulse-green 2s ease-in-out infinite",
               }}
             />
-            {apiKey ? "Gateway Live" : "Demo Mode"}
+            {keyConnected ? "Gateway Live" : "Demo Mode"}
           </div>
 
-          {/* Autonomous routing badge */}
           <div
             className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium"
             style={{
@@ -374,7 +348,6 @@ export default function EnterpriseChatWorkspace() {
           </div>
         </div>
 
-        {/* Right profile */}
         <div
           className="flex items-center gap-2 px-2.5 py-1.5 rounded-full text-xs font-medium cursor-pointer transition-all duration-150 active:scale-95 select-none"
           style={{
@@ -395,30 +368,6 @@ export default function EnterpriseChatWorkspace() {
           Sovereignty Admin
         </div>
       </div>
-
-      {/* ── API Key Missing Banner ──────────────────────────── */}
-      {keyMissing && (
-        <div
-          className="flex items-center gap-2 px-5 py-2.5 text-xs"
-          style={{
-            backgroundColor: "rgba(221, 107, 32, 0.08)",
-            borderBottom: "1px solid rgba(221, 107, 32, 0.2)",
-            color: "var(--color-warning)",
-          }}
-        >
-          <Key size={13} />
-          <span>
-            No Fireworks API key found.{" "}
-            <a
-              href="/settings"
-              style={{ color: "var(--color-accent)", textDecoration: "underline" }}
-            >
-              Add one in Settings
-            </a>{" "}
-            for live completions on the public route; private AMD pod routes work in demo mode.
-          </span>
-        </div>
-      )}
 
       {/* ── Error banner ──────────────────────────────────────── */}
       {error && (
@@ -444,7 +393,6 @@ export default function EnterpriseChatWorkspace() {
       {/* ── Chat / Greeting Area ─────────────────────────────── */}
       <div className="flex-1 overflow-y-auto px-5 py-6" style={{ maxHeight: "calc(100vh - 300px)" }}>
         {isEmpty ? (
-          /* ── Greeting Screen ───────────────────────────────── */
           <div className="flex flex-col items-center justify-center h-full text-center">
             <div className="max-w-3xl">
               <div
@@ -470,12 +418,12 @@ export default function EnterpriseChatWorkspace() {
                 className="text-xs mb-2 animate-slide-up"
                 style={{ color: "var(--color-text-muted)", animationDelay: "200ms" }}
               >
-                {apiKey
+                {keyConnected
                   ? "Live via autonomous hybrid router — the gateway selects the optimal model based on content sensitivity."
                   : "Demo mode — enter an API key in Settings for live completions on the public route."}
               </p>
 
-              {apiKey && (
+              {keyConnected && (
                 <div
                   className="flex items-center justify-center gap-1.5 mb-6 animate-slide-up text-xs"
                   style={{ color: "var(--color-success)", animationDelay: "250ms" }}
@@ -485,7 +433,6 @@ export default function EnterpriseChatWorkspace() {
                 </div>
               )}
 
-              {/* Suggestion cards */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 {SUGGESTIONS.map((suggestion, idx) => (
                   <button
@@ -514,11 +461,9 @@ export default function EnterpriseChatWorkspace() {
             </div>
           </div>
         ) : (
-          /* ── Chat Messages ──────────────────────────────────── */
           <div className="flex flex-col gap-4 max-w-4xl mx-auto">
             {messages.map((msg) => (
               <div key={msg.id} className="flex flex-col gap-1">
-                {/* Routing info badge (assistant only) */}
                 {msg.role === "assistant" && msg.routing && (
                   <div className="flex flex-col gap-1 self-start mb-1">
                     <div
@@ -544,7 +489,6 @@ export default function EnterpriseChatWorkspace() {
                       </span>
                     </div>
 
-                    {/* ── Quantum rules strip ──────────────────── */}
                     {msg.routing.quantum_rules && (
                       <div className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[9px]"
                         style={{
@@ -579,7 +523,6 @@ export default function EnterpriseChatWorkspace() {
                   </div>
                 )}
 
-                {/* Message bubble */}
                 <div
                   className={`px-4 py-3 rounded-xl text-sm leading-relaxed animate-fade-in ${
                     msg.role === "user" ? "self-end" : "self-start"
@@ -596,17 +539,24 @@ export default function EnterpriseChatWorkspace() {
                     }`,
                     color: "var(--color-text-primary)",
                     maxWidth: "85%",
-                    whiteSpace: "pre-wrap",
+                    whiteSpace: msg.role === "user" ? "pre-wrap" : "normal",
                     wordBreak: "break-word",
                   }}
                 >
-                  {msg.content || (
+                  {msg.content ? (
+                    msg.role === "assistant" ? (
+                      <div className="prose prose-sm max-w-none" style={{ color: "var(--color-text-primary)" }}>
+                        <ReactMarkdown components={markdownComponents}>{msg.content}</ReactMarkdown>
+                      </div>
+                    ) : (
+                      msg.content
+                    )
+                  ) : (
                     <span className="flex items-center gap-2" style={{ color: "var(--color-text-muted)" }}>
                       <Loader2 size={13} className="animate-spin" />
                       Generating response...
                     </span>
                   )}
-                  {/* Streaming cursor */}
                   {msg.role === "assistant" && streaming && msg.id === messages[messages.length - 1]?.id && (
                     <span className="inline-block w-2 h-4 ml-0.5 animate-pulse" style={{ backgroundColor: "var(--color-accent)" }} />
                   )}
@@ -635,7 +585,6 @@ export default function EnterpriseChatWorkspace() {
             border: "1px solid var(--color-border-light)",
           }}
         >
-          {/* Paperclip (file upload) */}
           <button
             onClick={handlePaperclip}
             aria-label="Attach a document or file"
@@ -659,7 +608,6 @@ export default function EnterpriseChatWorkspace() {
             accept=".txt,.pdf,.doc,.docx,.csv,.json,.md"
           />
 
-          {/* Auto-resizing textarea */}
           <label htmlFor="workspace-input" className="sr-only">
             Type your enterprise prompt
           </label>
@@ -681,7 +629,6 @@ export default function EnterpriseChatWorkspace() {
             }}
           />
 
-          {/* Send / Cancel button */}
           {streaming ? (
             <button
               onClick={cancelStream}
@@ -713,7 +660,6 @@ export default function EnterpriseChatWorkspace() {
           )}
         </div>
 
-        {/* ── Cryptographic Footnote ──────────────────────────── */}
         <p
           className="text-[10px] text-center mt-2.5 select-none"
           style={{ color: "var(--color-text-muted)" }}
@@ -732,3 +678,89 @@ export default function EnterpriseChatWorkspace() {
     </div>
   );
 }
+
+function updateMessageById(
+  messages: ChatMessage[],
+  id: string,
+  updater: (msg: ChatMessage) => ChatMessage,
+): ChatMessage[] {
+  return messages.map((m) => (m.id === id ? updater(m) : m));
+}
+
+function CodeBlock({ children, className }: { children: React.ReactNode; className?: string }) {
+  const [copied, setCopied] = useState(false);
+  const content = String(children).replace(/\n$/, "");
+  const lang = className?.replace("language-", "") || "";
+
+  const handleCopy = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // clipboard unavailable
+    }
+  }, [content]);
+
+  return (
+    <div
+      className="rounded-lg overflow-hidden my-2"
+      style={{ border: "1px solid var(--color-border-default)" }}
+    >
+      <div
+        className="flex items-center justify-between px-3 py-1.5 text-[10px] select-none"
+        style={{
+          backgroundColor: "var(--color-bg-base)",
+          borderBottom: "1px solid var(--color-border-light)",
+          color: "var(--color-text-muted)",
+        }}
+      >
+        <span className="font-medium uppercase tracking-wider">{lang || "code"}</span>
+        <button
+          onClick={handleCopy}
+          className="flex items-center gap-1 px-2 py-0.5 rounded cursor-pointer transition-all duration-150 active:scale-95"
+          style={{ color: copied ? "var(--color-success)" : "var(--color-text-muted)" }}
+          onMouseEnter={(e) => {
+            if (!copied) e.currentTarget.style.color = "var(--color-accent)";
+          }}
+          onMouseLeave={(e) => {
+            if (!copied) e.currentTarget.style.color = "var(--color-text-muted)";
+          }}
+        >
+          {copied ? <Check size={11} /> : <Copy size={11} />}
+          <span>{copied ? "Copied" : "Copy"}</span>
+        </button>
+      </div>
+      <pre className="!m-0 !rounded-none !border-none" style={{ background: "var(--color-bg-terminal)" }}>
+        <code className={className}>{children}</code>
+      </pre>
+    </div>
+  );
+}
+
+const markdownComponents = {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  code({ children, className, inline, ...props }: any) {
+    const isBlock = className?.startsWith("language-");
+    if (isBlock) {
+      return <CodeBlock className={className}>{children}</CodeBlock>;
+    }
+    return (
+      <code
+        className={className}
+        style={{
+          fontFamily: "var(--font-mono)",
+          fontSize: "0.8em",
+          background: "var(--color-bg-base)",
+          padding: "0.125rem 0.375rem",
+          borderRadius: "0.25rem",
+          border: "1px solid var(--color-border-light)",
+          color: "var(--color-accent)",
+        }}
+        {...props}
+      >
+        {children}
+      </code>
+    );
+  },
+};

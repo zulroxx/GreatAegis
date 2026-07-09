@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback } from "react";
 import type { InspectRequest, InspectResponse } from "../types/api";
 
-const API_BASE = "http://localhost:8000";
+const API_BASE = "http://localhost:8060";
 
 interface UseGatewayInspectResult {
   result: InspectResponse | null;

@@ -43,7 +43,7 @@ async def call_fireworks(prompt: str) -> str:
             "https://api.fireworks.ai/inference/v1/chat/completions",
             headers={"Authorization": f"Bearer {api_key}"},
             json={
-                "model": "accounts/fireworks/models/llama-v3-8b-instruct",
+                "model": "accounts/fireworks/models/glm-5p2",
                 "messages": [{"role": "user", "content": prompt}]
             }
         )

@@ -6,7 +6,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     ports:
-      - "3000:3000"
+      - "3060:3060"
     volumes:
       - ./frontend:/app
       - /app/node_modules
@@ -19,7 +19,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     ports:
-      - "8000:8000"
+      - "8060:8060"
     environment:
       - FIREWORKS_API_KEY=${FIREWORKS_API_KEY}
       - LOCAL_AMD_URL=${LOCAL_AMD_URL:-http://localhost:8080}
