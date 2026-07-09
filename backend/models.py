@@ -79,8 +79,8 @@ class DocumentIngestResponse(BaseModel):
     file_name: str
     chunks_stored: int
     doc_ids: list[str]
-    encryption: str = "AES-256-GCM via PQC module"
-    storage: str = "Local ChromaDB (air-gapped)"
+    encryption: str = "AES-256-GCM + ML-KEM-768 hybrid"
+    storage: str = "Local Qdrant (air-gapped)"
 
 
 class DocumentQueryRequest(BaseModel):
@@ -174,6 +174,7 @@ class ChatResponse(BaseModel):
     hardware_status: str
     fallback_engaged: bool
     quantum_rules: dict[str, bool] = {}
+    warning: str | None = None
 
 
 # ── Fireworks Models ─────────────────────────────────────────────────────────

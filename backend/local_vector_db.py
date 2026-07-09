@@ -1,64 +1,120 @@
 """
-GreatAegis Local Vector Database — Data Sovereignty Layer.
+GreatAegis Vector Database — Data Sovereignty Layer (Qdrant edition).
 
-Uses ChromaDB with a persistent local directory so sensitive enterprise
-documents NEVER leave the host.  Every text chunk is encrypted via
-AES-256-GCM (from pqc_crypto) BEFORE insertion, guaranteeing 100 %
-data sovereignty even against a compromised DB file.
+Connects to Qdrant either in cloud mode (QDRANT_URL + QDRANT_API_KEY) or in
+local persistent mode (GREATAEGIS_QDRANT_PATH). Text chunks are encrypted with
+hybrid AES-256-GCM + ML-KEM before insertion, and decrypted on-the-fly during
+queries.
 
-Architecture:
-  1. Uploaded file → text extraction → chunker (512-token sliding window)
-  2. Each chunk encrypted via pqc_crypto.encrypt_chunk()
-  3. Encrypted payload stored in Chroma with a plaintext metadata label
-     (filename, chunk_index, classification) for searchability
-  4. Query returns encrypted chunks → caller decrypts with stored keys
+SECURITY NOTE: when using cloud mode the stored *text* is encrypted, but the
+embedding vectors are derived from plaintext and are uploaded to the cloud
+instance. Treat the Qdrant cluster as part of your trust boundary.
 
-Dependencies: chromadb, sentence-transformers (for embeddings)
-Docker:    See docker-compose.vector-db.yml for a Qdrant alternative.
+Dependencies: qdrant-client, sentence-transformers
 """
 
 from __future__ import annotations
 
+import logging
 import os
 import uuid
 from typing import Optional
 
-import chromadb
-from chromadb.config import Settings as ChromaSettings
+from qdrant_client import QdrantClient
+from qdrant_client.models import (
+    Distance,
+    FieldCondition,
+    Filter,
+    MatchValue,
+    PayloadSchemaType,
+    PointStruct,
+    VectorParams,
+)
+from sentence_transformers import SentenceTransformer
 
-from pqc_crypto import encrypt_chunk, decrypt_chunk
+from pqc_crypto import decrypt_chunk, encrypt_chunk
+
+logger = logging.getLogger("great_aegis.vector_db")
 
 # ── Configuration ────────────────────────────────────────────────────────────
 
-CHROMA_PERSIST_DIR = os.environ.get(
-    "GREATAEGIS_VECTOR_DB_PATH",
-    os.path.join(os.path.dirname(__file__), "..", ".chroma_db"),
+# Cloud mode takes precedence when QDRANT_URL is set; otherwise local mode.
+QDRANT_URL = os.environ.get("QDRANT_URL", "").strip()
+QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY", "").strip()
+QDRANT_PATH = os.environ.get(
+    "GREATAEGIS_QDRANT_PATH",
+    os.path.join(os.path.dirname(__file__), "..", ".qdrant_db"),
 )
 
 COLLECTION_NAME = "sovereign_documents"
+EMBEDDING_MODEL = "all-MiniLM-L6-v2"
+VECTOR_SIZE = 384
 
-# ── Lazy client ─────────────────────────────────────────────────────────────
+# ── Lazy singletons ──────────────────────────────────────────────────────────
 
-_client: chromadb.PersistentClient | None = None
-_collection: chromadb.Collection | None = None
+_client: QdrantClient | None = None
+_model: SentenceTransformer | None = None
 
 
-def _get_collection() -> chromadb.Collection:
-    global _client, _collection
+def _is_cloud() -> bool:
+    return bool(QDRANT_URL)
+
+
+def _get_client() -> QdrantClient:
+    global _client
     if _client is None:
-        _client = chromadb.PersistentClient(
-            path=CHROMA_PERSIST_DIR,
-            settings=ChromaSettings(anonymized_telemetry=False),
+        if _is_cloud():
+            _client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY, timeout=30)
+            logger.info("Connected to Qdrant Cloud at %s", QDRANT_URL)
+        else:
+            _client = QdrantClient(path=QDRANT_PATH)
+            logger.info("Connected to local Qdrant at %s", QDRANT_PATH)
+        _ensure_collection()
+    return _client
+
+
+def _ensure_collection() -> None:
+    """Create the Qdrant collection and payload indexes if they do not exist."""
+    if not _client.collection_exists(COLLECTION_NAME):
+        _client.create_collection(
+            collection_name=COLLECTION_NAME,
+            vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE),
         )
-    if _collection is None:
-        _collection = _client.get_or_create_collection(
-            name=COLLECTION_NAME,
-            metadata={"hnsw:space": "cosine"},
-        )
-    return _collection
+        location = QDRANT_URL or QDRANT_PATH
+        logger.info("Created Qdrant collection '%s' at %s", COLLECTION_NAME, location)
+
+    # Payload indexes are required for filtering in Qdrant Cloud and improve
+    # filter performance in local mode.
+    for field in ("file_name", "classification"):
+        try:
+            _client.create_payload_index(
+                collection_name=COLLECTION_NAME,
+                field_name=field,
+                field_schema=PayloadSchemaType.KEYWORD,
+            )
+        except Exception as exc:
+            # Index may already exist; log at debug level and continue.
+            logger.debug("Payload index '%s' not created: %s", field, exc)
+
+
+def _get_model() -> SentenceTransformer:
+    global _model
+    if _model is None:
+        logger.info("Loading embedding model '%s'...", EMBEDDING_MODEL)
+        _model = SentenceTransformer(EMBEDDING_MODEL)
+        logger.info("Embedding model loaded")
+    return _model
+
+
+def _embed(texts: list[str]) -> list[list[float]]:
+    """Encode a list of texts into 384-dimensional cosine embeddings."""
+    model = _get_model()
+    embeddings = model.encode(texts, convert_to_numpy=True, show_progress_bar=False)
+    return [emb.tolist() for emb in embeddings]
 
 
 # ── Public API ──────────────────────────────────────────────────────────────
+
 
 def ingest_document(
     *,
@@ -67,40 +123,40 @@ def ingest_document(
     chunks: list[str],
 ) -> list[str]:
     """
-    Encrypt and store text chunks in the local sovereignty vector DB.
+    Encrypt and store text chunks in the local Qdrant vector DB.
 
-    Returns the list of document IDs that were inserted so the caller can
-    reference them later for retrieval or deletion.
+    Returns the list of point IDs that were inserted.
     """
-    col = _get_collection()
+    client = _get_client()
+    if not chunks:
+        return []
+
+    embeddings = _embed(chunks)
     ids: list[str] = []
-    documents: list[str] = []
-    metadatas: list[dict] = []
-    embeddings: list[list[float]] | None = None  # Chroma will auto-embed
+    points: list[PointStruct] = []
 
     for idx, plain_chunk in enumerate(chunks):
-        doc_id = f"{file_name}::chunk-{idx}::{uuid.uuid4().hex[:8]}"
+        # Qdrant requires valid UUID point IDs. Use a deterministic UUID5 so the
+        # same chunk of the same file always maps to the same point.
+        doc_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"greataegis:{file_name}:chunk-{idx}"))
         encrypted = encrypt_chunk(plain_chunk)
 
-        # Store a serialised JSON blob as the "document" text so Chroma's
-        # built-in embedding model (all-MiniLM-L6-v2) can index it.  The
-        # actual plaintext is NOT stored — only the ciphertext + nonce + key.
-        payload = (
-            f"[ENCRYPTED] nonce={encrypted['nonce']} "
-            f"ct={encrypted['ciphertext']} key={encrypted['key']}"
+        points.append(
+            PointStruct(
+                id=doc_id,
+                vector=embeddings[idx],
+                payload={
+                    "file_name": file_name,
+                    "classification": classification,
+                    "chunk_index": idx,
+                    "total_chunks": len(chunks),
+                    **encrypted,
+                },
+            )
         )
-
         ids.append(doc_id)
-        documents.append(payload)
-        metadatas.append({
-            "file_name": file_name,
-            "classification": classification,
-            "chunk_index": idx,
-            "total_chunks": len(chunks),
-            "encryption": "AES-256-GCM",
-        })
 
-    col.add(ids=ids, documents=documents, metadatas=metadatas)
+    client.upsert(collection_name=COLLECTION_NAME, points=points)
     return ids
 
 
@@ -112,85 +168,99 @@ def query_documents(
     """
     Semantic search across encrypted document chunks.
 
-    Returns a list of dicts, each containing the encrypted payload
-    metadata and the decrypted plaintext (reconstructed on-the-fly).
+    Returns a list of dicts, each containing the encrypted payload metadata
+    and the decrypted plaintext.
     """
-    col = _get_collection()
-    where_filter = None
-    if filter_classification:
-        where_filter = {"classification": filter_classification}
+    client = _get_client()
+    query_embedding = _embed([query_text])[0]
 
-    results = col.query(
-        query_texts=[query_text],
-        n_results=top_k,
-        where=where_filter,
+    query_filter = None
+    if filter_classification:
+        query_filter = Filter(
+            must=[
+                FieldCondition(
+                    key="classification",
+                    match=MatchValue(value=filter_classification),
+                )
+            ]
+        )
+
+    response = client.query_points(
+        collection_name=COLLECTION_NAME,
+        query=query_embedding,
+        limit=top_k,
+        query_filter=query_filter,
+        with_payload=True,
     )
 
     hits: list[dict] = []
-    if not results["ids"] or not results["ids"][0]:
-        return hits
+    for point in response.points:
+        payload = point.payload or {}
+        metadata = {
+            k: v
+            for k, v in payload.items()
+            if k not in ("nonce", "ciphertext", "key_nonce", "encrypted_key", "mlkem_ciphertext")
+        }
 
-    for i, doc_id in enumerate(results["ids"][0]):
-        metadata = results["metadatas"][0][i] if results["metadatas"] else {}
-        raw_doc = results["documents"][0][i] if results["documents"] else ""
-        distance = results["distances"][0][i] if results["distances"] else None
+        encrypted = {
+            k: payload.get(k, "")
+            for k in ("nonce", "ciphertext", "key_nonce", "encrypted_key", "mlkem_ciphertext")
+        }
 
-        # Parse the encrypted payload back out of the stored string
-        encrypted = _parse_encrypted_payload(raw_doc)
         plaintext = ""
-        if encrypted:
+        if all(encrypted.values()):
             try:
                 plaintext = decrypt_chunk(encrypted)
-            except Exception:
-                plaintext = "[decryption failed — key rotation?]"
+            except Exception as exc:
+                logger.warning("Failed to decrypt chunk %s: %s", point.id, exc)
+                plaintext = "[decryption failed — ML-KEM private key unavailable or corrupt]"
 
-        hits.append({
-            "id": doc_id,
-            "metadata": metadata,
-            "distance": distance,
-            "plaintext": plaintext,
-        })
+        hits.append(
+            {
+                "id": point.id,
+                "metadata": metadata,
+                "score": point.score,
+                "plaintext": plaintext,
+            }
+        )
 
     return hits
 
 
 def delete_document(file_name: str) -> int:
     """
-    Remove all chunks belonging to a given file. Returns count of deleted
-    chunks or 0 if the file was not found.
+    Remove all chunks belonging to a given file. Returns the count of deleted
+    points.
     """
-    col = _get_collection()
-    existing = col.get(where={"file_name": file_name})
-    if not existing["ids"]:
+    client = _get_client()
+    points, _ = client.scroll(
+        collection_name=COLLECTION_NAME,
+        scroll_filter=Filter(
+            must=[FieldCondition(key="file_name", match=MatchValue(value=file_name))]
+        ),
+        limit=10_000,
+        with_payload=False,
+    )
+    if not points:
         return 0
-    col.delete(ids=existing["ids"])
-    return len(existing["ids"])
+    ids = [point.id for point in points]
+    client.delete(collection_name=COLLECTION_NAME, points_selector=ids)
+    return len(ids)
 
 
 def collection_stats() -> dict:
-    """Return metadata about the local vector DB for the dashboard."""
-    col = _get_collection()
+    """Return metadata about the Qdrant DB for the dashboard."""
+    client = _get_client()
+    info = client.get_collection(COLLECTION_NAME)
+    location = QDRANT_URL or QDRANT_PATH
+    engine = (
+        "Qdrant Cloud with hybrid AES-256-GCM + ML-KEM"
+        if _is_cloud()
+        else "Qdrant (local, air-gapped) with hybrid AES-256-GCM + ML-KEM"
+    )
     return {
         "collection_name": COLLECTION_NAME,
-        "persist_directory": CHROMA_PERSIST_DIR,
-        "chunk_count": col.count(),
-        "engine": "ChromaDB (local, air-gapped)",
+        "persist_directory": location,
+        "chunk_count": info.points_count,
+        "engine": engine,
     }
-
-
-# ── Helpers ─────────────────────────────────────────────────────────────────
-
-def _parse_encrypted_payload(raw: str) -> dict | None:
-    """Reverse the serialisation done in ingest_document."""
-    if not raw.startswith("[ENCRYPTED]"):
-        return None
-    parts = raw.removeprefix("[ENCRYPTED] ").split(" ")
-    if len(parts) < 3:
-        return None
-    try:
-        nonce = parts[0].removeprefix("nonce=")
-        ct = parts[1].removeprefix("ct=")
-        key = parts[2].removeprefix("key=")
-        return {"nonce": nonce, "ciphertext": ct, "key": key}
-    except (ValueError, AttributeError):
-        return None
