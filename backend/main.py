@@ -28,6 +28,14 @@ Endpoints:
 
 from __future__ import annotations
 
+try:
+    from dotenv import load_dotenv
+    from pathlib import Path
+    _env_path = Path(__file__).resolve().parent / ".env"
+    load_dotenv(dotenv_path=_env_path)
+except ImportError:
+    pass
+
 import logging
 import os
 import time
