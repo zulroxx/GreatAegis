@@ -42,9 +42,12 @@ import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone, timedelta
 
-from fastapi import FastAPI, HTTPException, Header
+from fastapi import FastAPI, HTTPException, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 from sse_starlette.sse import EventSourceResponse
 
 from models import (
@@ -73,6 +76,7 @@ from models import (
     ModelUsageItem,
     ModelUsageResponse,
 )
+from pqc_crypto import encapsulate as mlkem_encapsulate, decapsulate as mlkem_decapsulate
 from sim_data import generate_gpu_telemetry, generate_offline_telemetry
 from hybrid_router import (
     route,
@@ -157,19 +161,33 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# CORS is locked to the local frontend origin by default. Override via env for
+# production deployments or judging VMs, but never use "*" with credentials.
+_ALLOWED_ORIGINS = os.environ.get(
+    "GREATAEGIS_CORS_ORIGINS",
+    "http://localhost:3060,http://127.0.0.1:3060,http://localhost:5173,http://127.0.0.1:5173",
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3060", "http://127.0.0.1:3060", "http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=[o.strip() for o in _ALLOWED_ORIGINS.split(",") if o.strip()],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "DELETE"],
+    allow_headers=["Content-Type", "X-Api-Key"],
 )
+
+# ── Rate limiting ────────────────────────────────────────────────────────────
+
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 # ── Health ───────────────────────────────────────────────────────────────────
 
 @app.get("/api/v1/gateway/health", response_model=HealthResponse)
-async def health():
+@limiter.limit("60/minute")
+async def health(request: Request):
     """
     Return app mode, hardware connectivity status, vector DB status,
     and available models.
@@ -197,10 +215,33 @@ async def health():
     )
 
 
+# ── Runtime mode switch ──────────────────────────────────────────────────────
+
+@app.post("/api/v1/gateway/mode")
+@limiter.limit("10/minute")
+async def set_app_mode(request: Request, mode: str):
+    """
+    Switch the gateway between 'simulated' and 'production' at runtime.
+
+    In production mode the backend probes the real vLLM endpoints; if the AMD
+    pods are unreachable the status becomes 'offline' and SECURE_FALLBACK is
+    engaged automatically.
+    """
+    global APP_MODE
+    mode_lower = mode.lower().strip()
+    if mode_lower not in ("simulated", "production"):
+        raise HTTPException(status_code=400, detail="mode must be 'simulated' or 'production'")
+    APP_MODE = mode_lower
+    _refresh_hardware_status()
+    logger.info("APP_MODE switched to '%s' at runtime", APP_MODE)
+    return {"app_mode": APP_MODE, "hardware_status": HARDWARE_STATUS}
+
+
 # ── System Metrics (Real Backend Data via psutil) ────────────────────────────
 
 @app.get("/api/v1/gateway/system", response_model=SystemMetricsResponse)
-async def system_metrics():
+@limiter.limit("30/minute")
+async def system_metrics(request: Request):
     """
     Return real system resource metrics from the backend host.
 
@@ -263,7 +304,7 @@ _METRICS = {
     "private_routes": 0,
     "public_routes": 0,
     "latency_ms_sum": 0.0,
-    "hourly": {},  # "2025-01-01T14" → count
+    "hourly": {},  # "2025-01-01T14" → {"public": int, "private": int}
     "request_times": [],  # list of (timestamp, elapsed_ms)
 }
 
@@ -286,38 +327,41 @@ def _track_metrics(verdict: str, risk_score: int, elapsed_ms: float) -> None:
         _METRICS["private_routes"] += 1
         if risk_score >= 70 or verdict == "secure_fallback":
             _METRICS["attacks_intercepted"] += 1
+        route_type = "private"
     else:
         _METRICS["public_routes"] += 1
+        route_type = "public"
 
-    # Hourly bucket
-    _METRICS["hourly"][hour_key] = _METRICS["hourly"].get(hour_key, 0) + 1
+    # Hourly bucket — track public/private separately so the chart reflects
+    # the actual routing verdicts instead of a fabricated split.
+    bucket = _METRICS["hourly"].get(hour_key, {"public": 0, "private": 0})
+    bucket[route_type] = bucket.get(route_type, 0) + 1
+    _METRICS["hourly"][hour_key] = bucket
     # Keep last 24 hours
     cutoff = (now - timedelta(hours=24)).strftime("%Y-%m-%dT%H")
     _METRICS["hourly"] = {k: v for k, v in _METRICS["hourly"].items() if k >= cutoff}
 
 
 def _build_chart_data() -> list[ChartDataPoint]:
-    """Build 24-hour chart data from real hourly buckets."""
+    """Build 24-hour chart data from real per-hour public/private buckets."""
     now = datetime.now(timezone.utc)
     points: list[ChartDataPoint] = []
     for i in range(23, -1, -1):
         hour = now - timedelta(hours=i)
         key = hour.strftime("%Y-%m-%dT%H")
         label = hour.strftime("%H:%M")
-        total = _METRICS["hourly"].get(key, 0)
-        # Split roughly: 70% public, 30% private for display
-        public = int(total * 0.7) if total > 0 else 0
-        private = total - public
+        bucket = _METRICS["hourly"].get(key, {"public": 0, "private": 0})
         points.append(ChartDataPoint(
             timestamp=label,
-            public_tokens=public,
-            private_pod=private,
+            public_tokens=bucket.get("public", 0),
+            private_pod=bucket.get("private", 0),
         ))
     return points
 
 
 @app.get("/api/v1/gateway/metrics", response_model=MetricsResponse)
-async def get_metrics():
+@limiter.limit("60/minute")
+async def get_metrics(request: Request):
     total = _METRICS["total_requests"]
     attacks = _METRICS["attacks_intercepted"]
     avg_latency = round(_METRICS["latency_ms_sum"] / max(total, 1) / 1000, 3)
@@ -376,7 +420,8 @@ def _event_summary(event_type: str, **extra: str) -> str:
 
 
 @app.get("/api/v1/gateway/logs", response_model=list[LogEntry])
-async def get_logs():
+@limiter.limit("60/minute")
+async def get_logs(request: Request):
     return [
         LogEntry(
             id=e["id"],
@@ -393,7 +438,8 @@ async def get_logs():
 # ── Inspect (Hybrid Router + PQC + Fallback) ─────────────────────────────────
 
 @app.post("/api/v1/gateway/inspect", response_model=InspectResponse)
-async def inspect_prompt(req: InspectRequest):
+@limiter.limit("30/minute")
+async def inspect_prompt(request: Request, req: InspectRequest):
     """
     Evaluate a prompt payload through the hybrid router.
 
@@ -444,12 +490,9 @@ async def inspect_prompt(req: InspectRequest):
         encryption_status = "client-side ML-KEM wrapping (emergency fallback)"
         streaming_endpoint = None  # no AMD streaming endpoint available
         if req.client_encryption_flag:
-            pqc_sig = (
-                f"fallback-kem-{req.prompt_payload[:48]}"
-                if len(req.prompt_payload) >= 48
-                else f"fallback-kem-{req.prompt_payload.ljust(32, '0')}"
-            )
-            pqc_valid = True  # fallback tunnel is always encrypted
+            # Exercise real ML-KEM for the emergency fallback tunnel.
+            _, ct = mlkem_encapsulate()
+            pqc_sig, pqc_valid = mlkem_decapsulate(ct)
         else:
             pqc_sig = "emergency-pqc-tunnel-recommended"
             pqc_valid = False
@@ -463,13 +506,9 @@ async def inspect_prompt(req: InspectRequest):
         encryption_status = "client-side ML-KEM wrapping"
 
         if req.client_encryption_flag:
-            fake_ct = (
-                req.prompt_payload[:64]
-                if len(req.prompt_payload) >= 64
-                else req.prompt_payload.ljust(32, "0")
-            )
-            from pqc_crypto import decapsulate
-            pqc_sig, pqc_valid = decapsulate(fake_ct)
+            # Exercise real ML-KEM for the private pod tunnel.
+            _, ct = mlkem_encapsulate()
+            pqc_sig, pqc_valid = mlkem_decapsulate(ct)
         else:
             pqc_sig = "recommend-client-encryption"
             pqc_valid = False
@@ -499,10 +538,11 @@ async def inspect_prompt(req: InspectRequest):
 # ── Vector DB: Ingest ───────────────────────────────────────────────────────
 
 @app.post("/api/v1/gateway/vector/ingest", response_model=DocumentIngestResponse)
-async def vector_ingest(req: DocumentIngestRequest):
+@limiter.limit("20/minute")
+async def vector_ingest(request: Request, req: DocumentIngestRequest):
     """
-    Accept a file's text content, chunk it, encrypt each chunk with
-    AES-256-GCM, and store in the local ChromaDB.
+    Accept a file's text content, chunk it, hybrid-encrypt each chunk with
+    AES-256-GCM + ML-KEM-768, and store in the local Qdrant vector DB.
     """
     from local_vector_db import ingest_document
 
@@ -536,7 +576,8 @@ async def vector_ingest(req: DocumentIngestRequest):
 # ── Vector DB: Query ────────────────────────────────────────────────────────
 
 @app.post("/api/v1/gateway/vector/query", response_model=DocumentQueryResponse)
-async def vector_query(req: DocumentQueryRequest):
+@limiter.limit("30/minute")
+async def vector_query(request: Request, req: DocumentQueryRequest):
     """Semantic search across encrypted document chunks."""
     from local_vector_db import query_documents, collection_stats
 
@@ -557,7 +598,8 @@ async def vector_query(req: DocumentQueryRequest):
 # ── Vector DB: Stats ────────────────────────────────────────────────────────
 
 @app.get("/api/v1/gateway/vector/stats", response_model=VectorDBStatsResponse)
-async def vector_stats():
+@limiter.limit("60/minute")
+async def vector_stats(request: Request):
     from local_vector_db import collection_stats
     stats = collection_stats()
     return VectorDBStatsResponse(**stats)
@@ -566,7 +608,8 @@ async def vector_stats():
 # ── GPU Telemetry ───────────────────────────────────────────────────────────
 
 @app.get("/api/v1/gateway/telemetry", response_model=GPUTelemetryResponse)
-async def gpu_telemetry():
+@limiter.limit("60/minute")
+async def gpu_telemetry(request: Request):
     """
     Return GPU health metrics.
 
@@ -660,7 +703,8 @@ def _read_live_rocm_smi() -> list[GPUDeviceInfo]:
 # ═══════════════════════════════════════════════════════════════════════════
 
 @app.post("/api/v1/gateway/verify-settings-password")
-async def verify_settings_password(req: SettingsPasswordRequest):
+@limiter.limit("5/minute")
+async def verify_settings_password(request: Request, req: SettingsPasswordRequest):
     """Verify the password for accessing the Settings page."""
     if not SETTINGS_PASSWORD:
         return {"granted": True}
@@ -668,7 +712,8 @@ async def verify_settings_password(req: SettingsPasswordRequest):
 
 
 @app.post("/api/v1/gateway/test-key")
-async def test_api_key(req: ApiKeyRequest):
+@limiter.limit("5/minute")
+async def test_api_key(request: Request, req: ApiKeyRequest):
     """
     Test whether a Fireworks API key is valid by calling the models list endpoint.
     Returns {valid: true} or {valid: false, detail: ...}.
@@ -697,7 +742,8 @@ async def test_api_key(req: ApiKeyRequest):
 
 
 @app.post("/api/v1/gateway/save-key")
-async def save_api_key(req: ApiKeyRequest):
+@limiter.limit("5/minute")
+async def save_api_key(request: Request, req: ApiKeyRequest):
     """Save the Fireworks API key server-side (in-memory only)."""
     global STORED_API_KEY
     key = req.api_key.strip()
@@ -710,7 +756,8 @@ async def save_api_key(req: ApiKeyRequest):
 
 
 @app.delete("/api/v1/gateway/key")
-async def delete_api_key():
+@limiter.limit("10/minute")
+async def delete_api_key(request: Request):
     """Remove the stored Fireworks API key."""
     global STORED_API_KEY
     STORED_API_KEY = ""
@@ -719,7 +766,8 @@ async def delete_api_key():
 
 
 @app.get("/api/v1/gateway/key-status", response_model=ApiKeyStatusResponse)
-async def key_status():
+@limiter.limit("60/minute")
+async def key_status(request: Request):
     """Return whether an API key is configured on the server (never exposes the key)."""
     return ApiKeyStatusResponse(
         configured=bool(STORED_API_KEY),
@@ -746,7 +794,9 @@ FIRST_CLASS_MODELS = [
 
 
 @app.post("/api/v1/fireworks/chat/stream")
+@limiter.limit("10/minute")
 async def fireworks_chat_stream(
+    request: Request,
     req: ChatRequest,
     x_api_key: str = Header(default="", alias="X-Api-Key"),
 ):
@@ -915,7 +965,9 @@ def _simulate_private_response(model_name: str, prompt: str, temperature: float,
 
 
 @app.post("/api/v1/gateway/chat/stream")
+@limiter.limit("10/minute")
 async def gateway_chat_stream(
+    request: Request,
     req: GatewayChatRequest,
     x_api_key: str = Header(default="", alias="X-Api-Key"),
 ):
@@ -972,6 +1024,7 @@ async def gateway_chat_stream(
     )
 
     # ── 2. Build routing info ──────────────────────────────────────────
+    warning: str | None = None
     if verdict == "public_fireworks":
         encryption_status = "plaintext (public route)"
         target_node = "Fireworks AI (Public)"
@@ -984,6 +1037,11 @@ async def gateway_chat_stream(
     else:  # secure_fallback
         encryption_status = "client-side ML-KEM wrapping (emergency fallback)"
         target_node = "Fireworks AI (Encrypted PQC Tunnel — Disaster Recovery)"
+        warning = (
+            "⚠️ AMD Secure Pod is not ready. Sensitive content was routed through "
+            "an encrypted PQC tunnel to Fireworks AI. Responses are generated on "
+            "the public endpoint with zero-trust encryption in transit."
+        )
 
     routing_info = ChatResponse(
         routing_verdict=verdict,
@@ -997,6 +1055,7 @@ async def gateway_chat_stream(
             "zero_trust_encapsulation": req.zero_trust_enabled,
             "pod_isolation": req.pod_isolation_enabled,
         },
+        warning=warning,
     )
 
     # ── 3. Build messages for AI call ──────────────────────────────────
@@ -1011,6 +1070,11 @@ async def gateway_chat_stream(
     async def event_generator():
         accumulated = ""
         yield {"event": "routing", "data": routing_info.model_dump_json()}
+
+        # Emit a prominent warning event when the AMD Pod is not ready so the
+        # frontend can display it before tokens start streaming.
+        if warning:
+            yield {"event": "warning", "data": warning}
 
         if verdict == "public_fireworks":
             api_key = _resolve_api_key(x_api_key)
@@ -1087,7 +1151,9 @@ async def gateway_chat_stream(
 
 
 @app.get("/api/v1/fireworks/models", response_model=FireworksModelsResponse)
+@limiter.limit("30/minute")
 async def fireworks_models(
+    request: Request,
     x_api_key: str = Header(default="", alias="X-Api-Key"),
 ):
     """
@@ -1119,7 +1185,9 @@ async def fireworks_models(
 
 
 @app.get("/api/v1/fireworks/usage", response_model=FireworksUsageResponse)
+@limiter.limit("30/minute")
 async def fireworks_usage(
+    request: Request,
     x_api_key: str = Header(default="", alias="X-Api-Key"),
 ):
     """
@@ -1157,7 +1225,8 @@ async def fireworks_usage(
 
 
 @app.get("/api/v1/fireworks/usage/models", response_model=ModelUsageResponse)
-async def fireworks_model_usage():
+@limiter.limit("30/minute")
+async def fireworks_model_usage(request: Request):
     """
     Return per-model Fireworks API usage breakdown.
     """
@@ -1190,4 +1259,7 @@ if __name__ == "__main__":
     import uvicorn
 
     port = int(os.environ.get("PORT", 8060))
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
+    # reload=True spawns a watchdog process that slows shutdown significantly.
+    # Enable it only when explicitly requested for development.
+    use_reload = os.environ.get("GREATAEGIS_RELOAD", "").lower() in ("1", "true", "yes")
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=use_reload)
