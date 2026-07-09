@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import type { ChatRoutingInfo, ChatMessage } from "../types/api";
 import { useChatHistory } from "../contexts/ChatHistoryContext";
+import { extractTextFromFile } from "../utils/fileTextExtractor";
 
 const API_BASE = "http://localhost:8060";
 
@@ -45,6 +46,8 @@ async function streamGatewayChat(
   zeroTrust: boolean,
   podIsolation: boolean,
   signal?: AbortSignal,
+  onWarning?: (warning: string) => void,
+  systemPrompt?: string,
 ) {
   try {
     const res = await fetch(`${API_BASE}/api/v1/gateway/chat/stream`, {
@@ -57,6 +60,7 @@ async function streamGatewayChat(
         model,
         temperature: 0.7,
         max_tokens: 2048,
+        system_prompt: systemPrompt,
         client_encryption_flag: quantumEncryption,
         quantum_encryption_enabled: quantumEncryption,
         zero_trust_enabled: zeroTrust,
@@ -114,6 +118,9 @@ async function streamGatewayChat(
             case "done":
               onDone();
               break;
+            case "warning":
+              if (onWarning) onWarning(dataStr);
+              break;
             case "error":
               onError(dataStr);
               return;
@@ -167,6 +174,9 @@ export default function EnterpriseChatWorkspace() {
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [keyConnected, setKeyConnected] = useState(false);
+  const [podWarning, setPodWarning] = useState<string | null>(null);
+  const [attachedFile, setAttachedFile] = useState<{ name: string; content: string } | null>(null);
+  const [fileProcessing, setFileProcessing] = useState(false);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -208,9 +218,40 @@ export default function EnterpriseChatWorkspace() {
 
   const handleSend = useCallback(async () => {
     const trimmed = input.trim();
-    if (!trimmed || streaming) return;
+    if ((!trimmed && !attachedFile) || streaming) return;
 
+    const currentFile = attachedFile;
+    setAttachedFile(null);
     setError(null);
+    setPodWarning(null);
+
+    // Ingest the file into Qdrant so it's available for future RAG queries
+    if (currentFile) {
+      fetch(`${API_BASE}/api/v1/gateway/vector/ingest`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          file_name: currentFile.name,
+          classification: "Confidential",
+          content: currentFile.content,
+          chunk_size: 512,
+          chunk_overlap: 64,
+        }),
+      }).catch(() => { /* non-critical — prompt still fires */ });
+    }
+
+    // Include extracted file content as plain context text (not framed as a
+    // "file attachment" — some models reflexively say "I can't read files"
+    // when they see that phrasing, even when the text is right there).
+    const fullPrompt = currentFile
+      ? `Document text:\n\n${currentFile.content}\n\nQuestion: ${trimmed || "Summarise the document above."}`
+      : trimmed;
+
+    if (currentFile && (!currentFile.content || currentFile.content.trim().length === 0)) {
+      setError("No readable text could be extracted from this file. Try a .txt file or a text-based PDF.");
+      setAttachedFile(null);
+      return;
+    }
 
     let convId = activeConversationId;
     if (!convId) {
@@ -220,7 +261,8 @@ export default function EnterpriseChatWorkspace() {
     const userMsg: ChatMessage = {
       id: `msg-${Date.now()}`,
       role: "user",
-      content: trimmed,
+      content: trimmed || `Uploaded: ${currentFile?.name}`,
+      attachment: currentFile ? { name: currentFile.name, content: currentFile.content } : null,
     };
 
     const assistantId = `msg-${Date.now() + 1}`;
@@ -253,7 +295,7 @@ export default function EnterpriseChatWorkspace() {
     let fullContent = "";
 
     await streamGatewayChat(
-      trimmed,
+      fullPrompt,
       model,
       (routing) => {
         updateMessages(convId, updateMessageById(newMessages, assistantId, (m) => ({ ...m, routing })));
@@ -274,6 +316,12 @@ export default function EnterpriseChatWorkspace() {
       zeroTrust,
       podIsolation,
       abortCtrl.signal,
+      (warning) => {
+        setPodWarning(warning);
+      },
+      currentFile
+        ? "The user's message contains document text labeled 'Document text:'. It is NOT a file attachment — the actual text has already been extracted and is included directly in the message. Read it and answer the user's question about it."
+        : undefined,
     );
   }, [input, streaming, activeConversationId, conversations, createConversation, updateMessages]);
 
@@ -289,6 +337,29 @@ export default function EnterpriseChatWorkspace() {
 
   const handlePaperclip = useCallback(() => {
     fileInputRef.current?.click();
+  }, []);
+
+  const handleFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    setFileProcessing(true);
+    setError(null);
+    try {
+      const { text, unsupported } = await extractTextFromFile(file);
+      setAttachedFile({ name: file.name, content: text });
+      if (unsupported) {
+        setError(text);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to read file");
+    } finally {
+      setFileProcessing(false);
+    }
+  }, []);
+
+  const removeAttachedFile = useCallback(() => {
+    setAttachedFile(null);
   }, []);
 
   const isEmpty = messages.length === 0;
@@ -387,6 +458,24 @@ export default function EnterpriseChatWorkspace() {
           >
             Dismiss
           </button>
+        </div>
+      )}
+
+      {/* ── AMD Pod Warning Banner ──────────────────────────── */}
+      {podWarning && (
+        <div
+          className="mx-5 mt-3 rounded-lg px-4 py-3 text-xs leading-relaxed flex items-start gap-2.5 animate-bounce-in"
+          style={{
+            backgroundColor: "rgba(221, 107, 32, 0.1)",
+            border: "1px solid rgba(221, 107, 32, 0.4)",
+            color: "var(--color-warning)",
+          }}
+        >
+          <AlertTriangle size={15} className="flex-shrink-0 mt-0.5" style={{ color: "var(--color-warning)" }} />
+          <div>
+            <p className="font-bold uppercase tracking-wide text-[0.65rem] mb-0.5">AMD Secure Pod Not Ready</p>
+            <p style={{ color: "var(--color-text-secondary)" }}>{podWarning}</p>
+          </div>
         </div>
       )}
 
@@ -543,6 +632,24 @@ export default function EnterpriseChatWorkspace() {
                     wordBreak: "break-word",
                   }}
                 >
+                  {msg.attachment && (
+                    <div
+                      className="flex items-center gap-2 mb-2 px-2.5 py-1.5 rounded-lg text-xs"
+                      style={{
+                        backgroundColor: "var(--color-bg-input)",
+                        border: "1px solid var(--color-border-light)",
+                      }}
+                    >
+                      <Paperclip size={11} style={{ color: "var(--color-accent)" }} />
+                      <span style={{ color: "var(--color-text-primary)" }} className="font-medium">
+                        {msg.attachment.name}
+                      </span>
+                      <span className="text-[10px]" style={{ color: "var(--color-text-muted)" }}>
+                        {(msg.attachment.content.length / 1024).toFixed(1)} KB
+                      </span>
+                    </div>
+                  )}
+
                   {msg.content ? (
                     msg.role === "assistant" ? (
                       <div className="prose prose-sm max-w-none" style={{ color: "var(--color-text-primary)" }}>
@@ -576,6 +683,48 @@ export default function EnterpriseChatWorkspace() {
           marginTop: "auto",
         }}
       >
+        {/* File processing indicator */}
+        {fileProcessing && (
+          <div className="mb-2 flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs" style={{ color: "var(--color-text-muted)" }}>
+            <Loader2 size={13} className="animate-spin" />
+            <span>Extracting text from file...</span>
+          </div>
+        )}
+
+        {/* Attached file chip */}
+        {attachedFile && (
+          <div className="mb-2 flex items-center gap-2">
+            <div
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs"
+              style={{
+                backgroundColor: "var(--color-accent-dim)",
+                border: "1px solid color-mix(in srgb, var(--color-accent) 30%, transparent)",
+                color: "var(--color-accent)",
+              }}
+            >
+              <Paperclip size={11} />
+              <span className="font-medium truncate max-w-[200px]">{attachedFile.name}</span>
+              <span className="text-[10px]" style={{ color: "var(--color-text-muted)" }}>
+                {attachedFile.content.length > 500
+                  ? `${(attachedFile.content.length / 1024).toFixed(1)} KB`
+                  : `${attachedFile.content.length} chars`}
+              </span>
+            </div>
+            <button
+              onClick={removeAttachedFile}
+              className="text-[10px] px-2 py-0.5 rounded cursor-pointer transition-all duration-150"
+              style={{
+                backgroundColor: "var(--color-error-dim)",
+                color: "var(--color-error)",
+                border: "1px solid rgba(255, 82, 82, 0.3)",
+              }}
+              aria-label="Remove attached file"
+            >
+              Remove
+            </button>
+          </div>
+        )}
+
         <div
           className="flex items-center gap-2 px-4 py-2.5 rounded-2xl"
           style={{
@@ -606,6 +755,7 @@ export default function EnterpriseChatWorkspace() {
             type="file"
             className="hidden"
             accept=".txt,.pdf,.doc,.docx,.csv,.json,.md"
+            onChange={handleFileChange}
           />
 
           <label htmlFor="workspace-input" className="sr-only">

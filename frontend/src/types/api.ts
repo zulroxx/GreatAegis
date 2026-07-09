@@ -91,6 +91,7 @@ export interface ChatRoutingInfo {
   encryption_status: string;
   hardware_status: string;
   fallback_engaged: boolean;
+  warning?: string | null;
   quantum_rules?: {
     ml_kem_wrapping: boolean;
     zero_trust_encapsulation: boolean;
@@ -162,4 +163,5 @@ export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   routing?: ChatRoutingInfo | null;
+  attachment?: { name: string; content: string } | null;
 }
