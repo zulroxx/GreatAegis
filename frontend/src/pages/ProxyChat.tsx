@@ -3,6 +3,7 @@ import ProxyMonitor from "../components/ProxyMonitor";
 import SecurePromptTerminal from "../components/SecurePromptTerminal";
 import HardwareStatusBanner from "../components/HardwareStatusBanner";
 import { classifyPrompt } from "../utils/contentClassifier";
+import { encapsulatePrompt } from "../utils/pqc-client";
 import type { InspectRequest, InspectResponse } from "../types/api";
 
 const SOVEREIGN_KEYWORDS = ["financial", "secret", "unreleased", "gdpr", "intellectual property"];
@@ -58,6 +59,8 @@ export default function ProxyChat() {
       encryption_status: isConfidential ? "active" : "bypassed",
       pqc_signature: isConfidential ? "ml-kem-768::sig_7a3f...c91e" : null,
       pqc_validation_flag: isConfidential,
+      pqc_algorithm: "ML-KEM-768 + ML-DSA-65",
+      pqc_public_key: null,
       streaming_endpoint: mode === "casual"
         ? "wss://gateway.greataegis.io/stream/public"
         : "wss://gateway.greataegis.io/stream/private",
@@ -99,6 +102,17 @@ export default function ProxyChat() {
           const zeroTrust = getQuantumRule("Zero-Trust Data-in-Transit Payload Encapsulation");
           const podIsolation = getQuantumRule("Strict Safe-Compute Pod Isolation");
 
+          // ── Client-side PQC: encrypt prompt before transit ──
+          let encryptedPrompt: string | undefined;
+          if (quantumEncryption) {
+            try {
+              const enc = await encapsulatePrompt(prompt);
+              encryptedPrompt = enc.encrypted_prompt;
+            } catch (e) {
+              console.warn("Client-side PQC encapsulation failed:", e);
+            }
+          }
+
           const res = await fetch(`${API_BASE}/api/v1/gateway/inspect`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -109,6 +123,7 @@ export default function ProxyChat() {
               quantum_encryption_enabled: quantumEncryption,
               zero_trust_enabled: zeroTrust,
               pod_isolation_enabled: podIsolation,
+              encrypted_prompt: encryptedPrompt,
             } satisfies InspectRequest),
           });
           if (!res.ok) {

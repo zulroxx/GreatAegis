@@ -30,6 +30,7 @@ export interface InspectRequest {
   quantum_encryption_enabled?: boolean;
   zero_trust_enabled?: boolean;
   pod_isolation_enabled?: boolean;
+  encrypted_prompt?: string;
 }
 
 export interface InspectResponse {
@@ -40,6 +41,8 @@ export interface InspectResponse {
   encryption_status: string;
   pqc_signature: string | null;
   pqc_validation_flag: boolean;
+  pqc_algorithm: string;
+  pqc_public_key: string | null;
   streaming_endpoint: string | null;
   hardware_status: "online" | "offline" | "simulated";
   fallback_engaged: boolean;
@@ -82,6 +85,7 @@ export interface ChatRequest {
   quantum_encryption_enabled?: boolean;
   zero_trust_enabled?: boolean;
   pod_isolation_enabled?: boolean;
+  encrypted_prompt?: string;
 }
 
 export interface ChatRoutingInfo {
@@ -92,6 +96,7 @@ export interface ChatRoutingInfo {
   hardware_status: string;
   fallback_engaged: boolean;
   warning?: string | null;
+  pqc_algorithm?: string;
   quantum_rules?: {
     ml_kem_wrapping: boolean;
     zero_trust_encapsulation: boolean;
