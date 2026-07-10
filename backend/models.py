@@ -143,7 +143,7 @@ class HealthResponse(BaseModel):
 class ChatRequest(BaseModel):
     prompt: str = Field(..., max_length=100_000)
     model: str = "accounts/fireworks/models/glm-5p2"
-    temperature: float = Field(default=0.7, ge=0.0, le=2.0)
+    temperature: float = Field(default=0.3, ge=0.0, le=2.0)
     max_tokens: int = Field(default=2048, ge=1, le=8192)
     system_prompt: str | None = None
     routing_profile: str = "auto"
@@ -159,7 +159,7 @@ class ChatRequest(BaseModel):
 class GatewayChatRequest(BaseModel):
     """Chat request that goes through the hybrid router."""
     prompt: str = Field(..., max_length=100_000)
-    temperature: float = Field(default=0.7, ge=0.0, le=2.0)
+    temperature: float = Field(default=0.3, ge=0.0, le=2.0)
     max_tokens: int = Field(default=2048, ge=1, le=8192)
     model: str | None = None
     system_prompt: str | None = None

@@ -9,7 +9,7 @@ Run inside the rocm Docker container on the AMD GPU droplet:
 
 The server listens on port 8001 and exposes:
     GET /health  — simple health check
-    GET /gpu     — raw rocm-smi --showmetrics --json output
+    GET /gpu     — raw rocm-smi -a --json output
 """
 import json
 import subprocess
@@ -24,7 +24,7 @@ class RocmMetricsHandler(BaseHTTPRequestHandler):
         elif self.path == "/gpu":
             try:
                 result = subprocess.run(
-                    ["rocm-smi", "--showmetrics", "--json"],
+                    ["rocm-smi", "-a", "--json"],
                     capture_output=True,
                     text=True,
                     timeout=10,

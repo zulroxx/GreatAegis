@@ -113,7 +113,7 @@ VLLM_ENDPOINTS: dict[str, str] = {
 }
 
 VLLM_MODEL_NAMES: dict[str, str] = {
-    "qwen": os.environ.get("VLLM_MODEL_NAME", "Qwen/Qwen3-0.6B"),
+    "qwen": os.environ.get("VLLM_MODEL_NAME", "bottlecapai/ThinkingCap-Qwen3.6-27B"),
 }
 
 # ── Production safety checks ──────────────────────────────────────────────────
@@ -831,8 +831,7 @@ def _parse_rocm_smi_output(raw: dict) -> list[GPUDeviceInfo]:
     """
     Parse rocm-smi JSON output into GPUDeviceInfo objects.
 
-    Handles both formats:
-      - 'rocm-smi --showmetrics --json'   (full metric dump)
+    Handles:
       - 'rocm-smi -a --json'              (all-info, used by remote proxy)
 
     No hardcoded defaults — only values actually present in the rocm-smi
@@ -859,7 +858,7 @@ def _parse_rocm_smi_output(raw: dict) -> list[GPUDeviceInfo]:
             return default
 
     # Default to MI300X spec (192 GB) when rocm-smi doesn't report total.
-    # --showmetrics gives VRAM Total Memory (MB); -a --json only gives %.
+    # -a --json only gives VRAM %, not absolute MB.
     _MI300X_VRAM_GB = 192.0
     _vram_total_raw = raw.get("card0", {}).get("VRAM Total Memory")
     _vram_total_gb: float = (
@@ -880,7 +879,7 @@ def _parse_rocm_smi_output(raw: dict) -> list[GPUDeviceInfo]:
                 or card_data.get("Temperature (Sensor junction) (C)")
             )
 
-            # VRAM used — --showmetrics gives raw MB; -a --json gives %
+            # VRAM used — -a --json gives % (no raw MB)
             vram_raw = card_data.get("VRAM Total Used Memory")
             if vram_raw is not None:
                 vram_used = _safe_float(vram_raw) / 1024
@@ -888,14 +887,14 @@ def _parse_rocm_smi_output(raw: dict) -> list[GPUDeviceInfo]:
                 pct = _safe_float(card_data.get("GPU Memory Allocated (VRAM%)"))
                 vram_used = round(pct * _vram_total_gb / 100.0, 1)
 
-            # VRAM total — only available in --showmetrics format; default to MI300X 192 GB
+            # VRAM total — not available in -a --json format; default to MI300X 192 GB
             vram_total: float = (
                 _vram_total_gb
                 if _vram_total_raw is not None
                 else (_safe_float(card_data.get("VRAM Total Memory")) / 1024) or _vram_total_gb
             )
 
-            # Utilization — --showmetrics uses "GFX Activity", -a --json uses "GPU use (%)"
+            # Utilization — -a --json uses "GPU use (%)"
             util = _safe_float(
                 card_data.get("GFX Activity")
                 or card_data.get("GPU use (%)")
