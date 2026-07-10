@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { LayoutDashboard, Shield, Waypoints, FlaskConical, Settings, ChevronLeft, X, Briefcase, Plus, MessageSquare, Pencil, Trash2, Check } from "lucide-react";
+import { LayoutDashboard, Shield, Waypoints, FlaskConical, Settings, ChevronLeft, ChevronDown, X, Briefcase, Plus, MessageSquare, Pencil, Trash2, Check, Globe } from "lucide-react";
 import { useChatHistory } from "../contexts/ChatHistoryContext";
 
 export type TabKey = "overview" | "security" | "proxy" | "routing-lab" | "workspace" | "settings";
@@ -10,12 +10,13 @@ interface NavItem {
   icon: React.ReactNode;
 }
 
-const NAV_ITEMS: NavItem[] = [
+const WORKSPACE_ITEM: NavItem = { key: "workspace", label: "Workspace", icon: <Briefcase size={18} /> };
+
+const GATEWAY_ITEMS: NavItem[] = [
   { key: "overview", label: "Gateway Overview", icon: <LayoutDashboard size={18} /> },
   { key: "security", label: "Security Suite", icon: <Shield size={18} /> },
   { key: "proxy", label: "Proxy & Chat", icon: <Waypoints size={18} /> },
   { key: "routing-lab", label: "Routing Lab", icon: <FlaskConical size={18} /> },
-  { key: "workspace", label: "Workspace", icon: <Briefcase size={18} /> },
 ];
 
 const SETTINGS_ITEM: NavItem = { key: "settings", label: "Settings", icon: <Settings size={18} /> };
@@ -49,6 +50,7 @@ export default function Sidebar({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const editInputRef = useRef<HTMLInputElement>(null);
+  const [gatewayOpen, setGatewayOpen] = useState(true);
 
   useEffect(() => {
     if (editingId && editInputRef.current) {
@@ -247,12 +249,12 @@ export default function Sidebar({
       </button>
 
       <nav className="flex flex-col gap-1">
-        {NAV_ITEMS.map((item) => {
-          const isActive = activeTab === item.key;
+        {(() => {
+          const isActive = activeTab === WORKSPACE_ITEM.key;
           return (
             <button
-              key={item.key}
-              onClick={() => handleTabClick(item.key)}
+              key={WORKSPACE_ITEM.key}
+              onClick={() => handleTabClick(WORKSPACE_ITEM.key)}
               className="flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium w-full text-left cursor-pointer active:scale-[0.98] transition-all duration-150"
               style={{
                 backgroundColor: isActive ? "var(--color-sidebar-hover)" : "transparent",
@@ -261,14 +263,60 @@ export default function Sidebar({
                 paddingLeft: isActive ? "9px" : "12px",
                 justifyContent: collapsed ? "center" : "flex-start",
               }}
-              title={collapsed ? item.label : undefined}
-              aria-label={collapsed ? item.label : undefined}
+              title={collapsed ? WORKSPACE_ITEM.label : undefined}
+              aria-label={collapsed ? WORKSPACE_ITEM.label : undefined}
             >
-              <span className="flex-shrink-0">{item.icon}</span>
-              {!collapsed && <span>{item.label}</span>}
+              <span className="flex-shrink-0">{WORKSPACE_ITEM.icon}</span>
+              {!collapsed && <span>{WORKSPACE_ITEM.label}</span>}
             </button>
           );
-        })}
+        })()}
+
+        <button
+          onClick={() => setGatewayOpen(!gatewayOpen)}
+          className="flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium w-full text-left cursor-pointer transition-all duration-150"
+          style={{
+            color: "var(--color-text-secondary)",
+            justifyContent: collapsed ? "center" : "flex-start",
+          }}
+          title={collapsed ? "Gateway" : undefined}
+          aria-label={collapsed ? "Gateway" : undefined}
+        >
+          <span className="flex-shrink-0"><Globe size={18} /></span>
+          {!collapsed && (
+            <>
+              <span className="flex-1">Gateway</span>
+              <ChevronDown
+                size={14}
+                className={`transition-transform duration-200 ${gatewayOpen ? "" : "-rotate-90"}`}
+              />
+            </>
+          )}
+        </button>
+
+        {!collapsed && gatewayOpen && (
+          <div className="flex flex-col gap-1 pl-4">
+            {GATEWAY_ITEMS.map((item) => {
+              const isActive = activeTab === item.key;
+              return (
+                <button
+                  key={item.key}
+                  onClick={() => handleTabClick(item.key)}
+                  className="flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium w-full text-left cursor-pointer active:scale-[0.98] transition-all duration-150"
+                  style={{
+                    backgroundColor: isActive ? "var(--color-sidebar-hover)" : "transparent",
+                    color: isActive ? "var(--color-sidebar-active)" : "var(--color-text-secondary)",
+                    borderLeft: isActive ? "3px solid var(--color-sidebar-active)" : "3px solid transparent",
+                    paddingLeft: isActive ? "9px" : "12px",
+                  }}
+                >
+                  <span className="flex-shrink-0">{item.icon}</span>
+                  <span>{item.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
       </nav>
 
       {!collapsed && conversations.length > 0 && (
@@ -342,12 +390,12 @@ export default function Sidebar({
         </div>
 
         <nav className="flex flex-col gap-1">
-          {NAV_ITEMS.map((item) => {
-            const isActive = activeTab === item.key;
+          {(() => {
+            const isActive = activeTab === WORKSPACE_ITEM.key;
             return (
               <button
-                key={item.key}
-                onClick={() => handleTabClick(item.key)}
+                key={WORKSPACE_ITEM.key}
+                onClick={() => handleTabClick(WORKSPACE_ITEM.key)}
                 className="flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium w-full text-left cursor-pointer active:scale-[0.98]"
                 style={{
                   backgroundColor: isActive ? "var(--color-sidebar-hover)" : "transparent",
@@ -357,11 +405,49 @@ export default function Sidebar({
                   transition: "background-color 150ms, color 150ms, border-color 150ms, padding-left 150ms",
                 }}
               >
-                <span className="flex-shrink-0">{item.icon}</span>
-                <span>{item.label}</span>
+                <span className="flex-shrink-0">{WORKSPACE_ITEM.icon}</span>
+                <span>{WORKSPACE_ITEM.label}</span>
               </button>
             );
-          })}
+          })()}
+
+          <button
+            onClick={() => setGatewayOpen(!gatewayOpen)}
+            className="flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium w-full text-left cursor-pointer transition-all duration-150"
+            style={{ color: "var(--color-text-secondary)" }}
+          >
+            <span className="flex-shrink-0"><Globe size={18} /></span>
+            <span className="flex-1">Gateway</span>
+            <ChevronDown
+              size={14}
+              className={`transition-transform duration-200 ${gatewayOpen ? "" : "-rotate-90"}`}
+            />
+          </button>
+
+          {gatewayOpen && (
+            <div className="flex flex-col gap-1 pl-4">
+              {GATEWAY_ITEMS.map((item) => {
+                const isActive = activeTab === item.key;
+                return (
+                  <button
+                    key={item.key}
+                    onClick={() => handleTabClick(item.key)}
+                    className="flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium w-full text-left cursor-pointer active:scale-[0.98]"
+                    style={{
+                      backgroundColor: isActive ? "var(--color-sidebar-hover)" : "transparent",
+                      color: isActive ? "var(--color-sidebar-active)" : "var(--color-text-secondary)",
+                      borderLeft: isActive ? "3px solid var(--color-sidebar-active)" : "3px solid transparent",
+                      paddingLeft: isActive ? "9px" : "12px",
+                      transition: "background-color 150ms, color 150ms, border-color 150ms, padding-left 150ms",
+                    }}
+                  >
+                    <span className="flex-shrink-0">{item.icon}</span>
+                    <span>{item.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </nav>
 
         {conversations.length > 0 && (
