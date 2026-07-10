@@ -30,8 +30,8 @@ async def hybrid_inference(request: InferenceRequest):
             response=response_text,
             provider=request.provider
         )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 async def call_fireworks(prompt: str) -> str:
     api_key = os.getenv("FIREWORKS_API_KEY")

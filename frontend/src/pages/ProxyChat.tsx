@@ -4,6 +4,7 @@ import SecurePromptTerminal from "../components/SecurePromptTerminal";
 import HardwareStatusBanner from "../components/HardwareStatusBanner";
 import { classifyPrompt } from "../utils/contentClassifier";
 import { encapsulatePrompt } from "../utils/pqc-client";
+import { apiFetch } from "../utils/api";
 import type { InspectRequest, InspectResponse } from "../types/api";
 
 const SOVEREIGN_KEYWORDS = ["financial", "secret", "unreleased", "gdpr", "intellectual property"];
@@ -112,7 +113,7 @@ export default function ProxyChat() {
             }
           }
 
-          const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/v1/gateway/inspect`, {
+          const res = await apiFetch(`/api/v1/gateway/inspect`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -164,7 +165,7 @@ export default function ProxyChat() {
       // Tell the backend to switch between simulated and production mode so
       // the AMD pod status reflects the real probe result (online/offline)
       // instead of staying stuck on "simulated".
-      fetch(`${import.meta.env.VITE_API_BASE_URL}/api/v1/gateway/mode?mode=${next ? "simulated" : "production"}`, {
+      apiFetch(`/api/v1/gateway/mode?mode=${next ? "simulated" : "production"}`, {
         method: "POST",
       }).catch(() => {
         // Backend may be unreachable — non-critical, health poll will retry

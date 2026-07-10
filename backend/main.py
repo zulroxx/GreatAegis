@@ -112,15 +112,25 @@ VLLM_ENDPOINTS: dict[str, str] = {
     "gemma-7b": os.environ.get("VLLM_GEMMA_ENDPOINT", ""),
 }
 
+VLLM_MODEL_NAMES: dict[str, str] = {
+    "mixtral-8x7b": os.environ.get("VLLM_MIXTRAL_MODEL_NAME", "mixtral-8x7b"),
+    "gemma-7b": os.environ.get("VLLM_GEMMA_MODEL_NAME", "gemma-7b"),
+}
+
 # ── Production safety checks ──────────────────────────────────────────────────
 
 if APP_MODE == "production":
+    import sys
     _default_mlkem = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f"
     _default_mldsa = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
     if os.environ.get("GREATAEGIS_MLKEM_SEED", "") == _default_mlkem:
-        logger.warning("GREATAEGIS_MLKEM_SEED is using the default/dev seed. Generate a random seed for production.")
+        logger.error("FATAL: GREATAEGIS_MLKEM_SEED is the default/dev seed. Refusing to start in production mode.")
+        logger.error("Generate a new seed: python -c \"import secrets; print(secrets.token_hex(64))\"")
+        sys.exit(1)
     if os.environ.get("GREATAEGIS_MLDSA_SEED", "") == _default_mldsa:
-        logger.warning("GREATAEGIS_MLDSA_SEED is using the default/dev seed. Generate a random seed for production.")
+        logger.error("FATAL: GREATAEGIS_MLDSA_SEED is the default/dev seed. Refusing to start in production mode.")
+        logger.error("Generate a new seed: python -c \"import secrets; print(secrets.token_hex(32))\"")
+        sys.exit(1)
     if SETTINGS_PASSWORD in ("", "root"):
         logger.warning("SETTINGS_PASSWORD is empty or using the default 'root'. Set a strong password for production.")
     if not VLLM_ENDPOINTS.get("mixtral-8x7b") and not VLLM_ENDPOINTS.get("gemma-7b"):
@@ -193,30 +203,50 @@ app.add_middleware(
     allow_origins=[o.strip() for o in _ALLOWED_ORIGINS.split(",") if o.strip()],
     allow_credentials=True,
     allow_methods=["GET", "POST", "DELETE"],
-    allow_headers=["Content-Type", "X-Api-Key"],
+    allow_headers=["Content-Type", "X-Api-Key", "Authorization"],
 )
+
+# ── Gateway API token (shared-secret auth) ────────────────────────────────────
+
+GATEWAY_API_TOKEN: str = os.environ.get("GATEWAY_API_TOKEN", "")
 
 
 @app.middleware("http")
-async def _cors_wildcard_middleware(request: Request, call_next):
+async def _security_middleware(request: Request, call_next):
     origin = request.headers.get("origin", "")
-    if origin.endswith(".vercel.app") and origin.startswith("https://"):
-        if request.method == "OPTIONS":
-            return Response(
-                status_code=200,
-                headers={
-                    "Access-Control-Allow-Origin": origin,
-                    "Access-Control-Allow-Credentials": "true",
-                    "Access-Control-Allow-Methods": "GET, POST, DELETE",
-                    "Access-Control-Allow-Headers": "Content-Type, X-Api-Key",
-                    "Access-Control-Max-Age": "600",
-                },
-            )
-        response = await call_next(request)
-        response.headers["Access-Control-Allow-Origin"] = origin
-        response.headers["Access-Control-Allow-Credentials"] = "true"
-        return response
-    return await call_next(request)
+    is_local = (
+        origin.startswith("http://localhost:")
+        or origin.startswith("http://127.0.0.1:")
+        or request.client.host in ("127.0.0.1", "::1")
+        if request.client
+        else False
+    )
+
+    if GATEWAY_API_TOKEN and not is_local and request.method != "OPTIONS":
+        if request.url.path.startswith("/api/v1/"):
+            auth_header = request.headers.get("Authorization", "")
+            if not (auth_header.startswith("Bearer ") and auth_header[7:] == GATEWAY_API_TOKEN):
+                rejection = Response(
+                    status_code=401,
+                    content='{"detail":"Unauthorized — invalid or missing gateway token"}',
+                    media_type="application/json",
+                )
+                rejection.headers["X-Content-Type-Options"] = "nosniff"
+                rejection.headers["X-Frame-Options"] = "DENY"
+                if origin:
+                    rejection.headers["Access-Control-Allow-Origin"] = origin
+                    rejection.headers["Access-Control-Allow-Credentials"] = "true"
+                return rejection
+
+    response = await call_next(request)
+
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    if request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+
+    return response
 
 
 # ── Rate limiting ────────────────────────────────────────────────────────────
@@ -1181,8 +1211,8 @@ async def test_api_key(request: Request, req: ApiKeyRequest):
                 return {"valid": False, "detail": f"Fireworks returned HTTP {resp.status_code}"}
     except httpx.TimeoutException:
         return {"valid": False, "detail": "Connection timed out"}
-    except Exception as exc:
-        return {"valid": False, "detail": str(exc)}
+    except Exception:
+        return {"valid": False, "detail": "Connection error — unable to reach Fireworks AI"}
 
 
 @app.post("/api/v1/gateway/save-key")
@@ -1195,7 +1225,7 @@ async def save_api_key(request: Request, req: ApiKeyRequest):
         return {"saved": False, "detail": "Key is empty"}
     STORED_API_KEY = key
     hint = _key_hint(key)
-    logger.info("Fireworks API key saved (in-memory) — hint: %s", hint)
+    logger.info("Fireworks API key saved (in-memory)")
     return {"saved": True, "key_hint": hint}
 
 
@@ -1555,7 +1585,7 @@ async def gateway_chat_stream(
             async for chunk in stream_chat_completion(
                 api_key=api_key,
                 messages=messages,
-                model=req.model or model_name,
+                model=model_name,
                 temperature=req.temperature,
                 max_tokens=req.max_tokens,
                 encrypt_in_transit=req.quantum_encryption_enabled,
@@ -1578,7 +1608,7 @@ async def gateway_chat_stream(
             async for chunk in stream_chat_completion(
                 api_key=api_key,
                 messages=messages,
-                model=req.model or model_name,
+                model=model_name,
                 temperature=req.temperature,
                 max_tokens=req.max_tokens,
                 encrypt_in_transit=req.quantum_encryption_enabled,
@@ -1594,25 +1624,79 @@ async def gateway_chat_stream(
 
         else:
             # Private AMD pod routes (private_gemma / private_mixtral)
-            if APP_MODE == "production":
-                pass
+            vllm_endpoint = VLLM_ENDPOINTS.get(model_name, "")
+            vllm_ok = False
 
-            gen = _simulate_private_response(
-                model_name=model_name,
-                prompt=req.prompt,
-                temperature=req.temperature,
-                max_tokens=req.max_tokens,
-            )
-            for chunk in gen:
-                if chunk["type"] == "token":
-                    accumulated += chunk["content"]
-                    yield {"event": "token", "data": chunk["content"]}
-                elif chunk["type"] == "done":
-                    yield {"event": "done", "data": chunk.get("finish_reason", "stop")}
+            if APP_MODE == "production" and vllm_endpoint:
+                import httpx as _httpx
+                import json as _json
+                vllm_model = VLLM_MODEL_NAMES.get(model_name, model_name)
+                vllm_body = {
+                    "model": vllm_model,
+                    "messages": messages,
+                    "temperature": req.temperature,
+                    "max_tokens": req.max_tokens,
+                    "stream": True,
+                }
+                try:
+                    async with _httpx.AsyncClient(timeout=120.0) as vllm_client:
+                        async with vllm_client.stream(
+                            "POST", vllm_endpoint, json=vllm_body
+                        ) as vllm_resp:
+                            if vllm_resp.status_code == 200:
+                                vllm_ok = True
+                                async for line in vllm_resp.aiter_lines():
+                                    line = line.strip()
+                                    if not line or line == "data: [DONE]":
+                                        continue
+                                    if line.startswith("data: "):
+                                        try:
+                                            chunk_data = _json.loads(line[6:])
+                                            choices = chunk_data.get("choices", [])
+                                            if choices:
+                                                delta = choices[0].get("delta", {})
+                                                content = delta.get("content", "")
+                                                if content:
+                                                    accumulated += content
+                                                    yield {"event": "token", "data": content}
+                                                finish = choices[0].get("finish_reason")
+                                                if finish:
+                                                    yield {"event": "done", "data": finish}
+                                        except _json.JSONDecodeError:
+                                            pass
+                                    elif line == "[DONE]":
+                                        yield {"event": "done", "data": "stop"}
+                            else:
+                                _body = await vllm_resp.aread()
+                                logger.warning(
+                                    "vLLM %s returned HTTP %d: %s",
+                                    vllm_endpoint, vllm_resp.status_code, _body.decode(errors="replace")[:300],
+                                )
+                                yield {"event": "warning", "data": f"AMD Pod returned HTTP {vllm_resp.status_code} — using simulated response"}
+                except Exception as exc:
+                    logger.warning("vLLM stream to %s failed: %s", vllm_endpoint, exc)
+                    yield {"event": "warning", "data": f"AMD Pod unreachable — using simulated response"}
+
+            if not vllm_ok:
+                gen = _simulate_private_response(
+                    model_name=model_name,
+                    prompt=req.prompt,
+                    temperature=req.temperature,
+                    max_tokens=req.max_tokens,
+                )
+                for chunk in gen:
+                    if chunk["type"] == "token":
+                        accumulated += chunk["content"]
+                        yield {"event": "token", "data": chunk["content"]}
+                    elif chunk["type"] == "done":
+                        yield {"event": "done", "data": chunk.get("finish_reason", "stop")}
 
         # ── Estimate usage for all routes ──────────────────────────
         from fireworks_client import track_estimated
-        effective_model = req.model or model_name
+        if verdict.startswith("private_") or verdict == "secure_fallback":
+            effective_model = model_name
+        else:
+            effective_model = req.model or model_name
         track_estimated(
             model=effective_model,
             prompt=req.prompt,

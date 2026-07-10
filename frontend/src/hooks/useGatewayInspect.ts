@@ -1,7 +1,6 @@
 import { useState, useRef, useCallback } from "react";
 import type { InspectRequest, InspectResponse } from "../types/api";
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL;
+import { apiFetch } from "../utils/api";
 
 interface UseGatewayInspectResult {
   result: InspectResponse | null;
@@ -23,7 +22,7 @@ export default function useGatewayInspect(): UseGatewayInspectResult {
     setResult(null);
 
     try {
-      const res = await fetch(`${API_BASE}/api/v1/gateway/inspect`, {
+        const res = await apiFetch(`/api/v1/gateway/inspect`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),

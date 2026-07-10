@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import type { LogEntry } from "../types/api";
+import { apiFetch } from "../utils/api";
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL;
 const POLL_INTERVAL = 5000;
 
 interface UseLogsPollingResult {
@@ -21,7 +21,7 @@ export default function useLogsPolling(): UseLogsPollingResult {
 
     const fetchLogs = async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/v1/gateway/logs`);
+        const res = await apiFetch(`/api/v1/gateway/logs`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json: LogEntry[] = await res.json();
         if (mounted.current) {

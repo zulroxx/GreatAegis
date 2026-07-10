@@ -6,8 +6,7 @@ import useMetricsPolling from "../hooks/useMetricsPolling";
 import useHealthPolling from "../hooks/useHealthPolling";
 import { useState, useEffect } from "react";
 import type { ModelUsageResponse } from "../types/api";
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL;
+import { apiFetch } from "../utils/api";
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -27,7 +26,7 @@ export default function GatewayOverview() {
     const fetchUsage = async () => {
       setUsageLoading(true);
       try {
-        const res = await fetch(`${API_BASE}/api/v1/fireworks/usage/models`);
+        const res = await apiFetch(`/api/v1/fireworks/usage/models`);
         if (res.ok && !cancelled) {
           const json: ModelUsageResponse = await res.json();
           setModelUsage(json);
