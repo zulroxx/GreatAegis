@@ -11,7 +11,7 @@ import SettingsPage from "./pages/Settings";
 const COLLAPSE_KEY = "GREATAEGIS_SIDEBAR_COLLAPSED";
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<TabKey>("overview");
+  const [activeTab, setActiveTab] = useState<TabKey>("workspace");
 
   // Desktop sidebar collapsed state (persisted)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
