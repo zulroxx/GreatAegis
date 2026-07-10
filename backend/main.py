@@ -566,6 +566,12 @@ async def get_logs(request: Request):
     ]
 
 
+@app.delete("/api/v1/gateway/logs")
+async def clear_logs():
+    _EVENT_LOG.clear()
+    return {"cleared": True, "count": 0}
+
+
 # ── Inspect (Hybrid Router + PQC + Fallback) ─────────────────────────────────
 
 @app.post("/api/v1/gateway/inspect", response_model=InspectResponse)

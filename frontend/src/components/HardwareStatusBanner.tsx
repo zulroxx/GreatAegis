@@ -92,7 +92,7 @@ export default function HardwareStatusBanner({
           className="flex items-center gap-4 px-3 py-2 rounded-lg text-xs"
           style={{
             backgroundColor: "var(--color-bg-card)",
-            border: "1px solid var(--color-border-default)",
+            border: "0px solid var(--color-border-default)",
           }}
         >
           {/* DEMO / LIVE sliding pill toggle */}
@@ -103,7 +103,7 @@ export default function HardwareStatusBanner({
               className="relative flex items-center h-7 w-[130px] rounded-full cursor-pointer select-none overflow-hidden active:scale-95 transition-transform duration-150"
               style={{
                 backgroundColor: "var(--color-bg-input)",
-                border: "1px solid var(--color-border-default)",
+                border: "0px solid var(--color-border-default)",
                 outline: "none",
               }}
               aria-label={`Switch to ${isDemoMode ? "live" : "demo"} mode`}
@@ -191,7 +191,7 @@ export default function HardwareStatusBanner({
         className="flex items-center gap-4 px-3 py-2 rounded-lg text-xs animate-slide-up"
         style={{
           backgroundColor: "var(--color-bg-card)",
-          border: "1px solid var(--color-border-default)",
+          border: "0px solid var(--color-border-default)",
         }}
       >
         {/* DEMO / LIVE sliding pill toggle */}
@@ -201,7 +201,7 @@ export default function HardwareStatusBanner({
           className="relative flex items-center h-7 w-[130px] rounded-full cursor-pointer select-none overflow-hidden active:scale-95 transition-transform duration-150 flex-shrink-0"
           style={{
             backgroundColor: "var(--color-bg-input)",
-            border: "1px solid var(--color-border-default)",
+            border: "0px solid var(--color-border-default)",
             outline: "none",
           }}
           aria-label={`Switch to ${isDemoMode ? "live" : "demo"} mode`}

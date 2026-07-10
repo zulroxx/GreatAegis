@@ -55,7 +55,7 @@ export default function MetricCard({ icon, label, value, suffix = "" }: MetricCa
       className="rounded-lg px-5 py-4 flex flex-col gap-1.5"
       style={{
         backgroundColor: "var(--color-bg-card)",
-        border: "1px solid var(--color-border-default)",
+        border: "0px solid var(--color-border-default)",
         minWidth: "180px",
         flex: 1,
       }}

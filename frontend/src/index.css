@@ -245,12 +245,12 @@
 
 /* ── Global focus-visible for keyboard accessibility ──────── */
 *:focus-visible {
-  outline: 2px solid #00E676;
+  /* outline: 2px solid #00E676; */
   outline-offset: 2px;
   border-radius: 4px;
 }
 .light-theme *:focus-visible {
-  outline-color: #15803D;  /* Dark green for light backgrounds */
+  /* outline-color: #15803D;  Dark green for light backgrounds */
 }
 
 /* ── Smooth dark scrollbar ────────────────────────────────── */
@@ -294,7 +294,7 @@
   margin-bottom: 0.75rem;
   padding: 0.75rem 1rem;
   background: var(--color-bg-terminal);
-  border: 1px solid var(--color-border-default);
+  border: 0px solid var(--color-border-default);
   border-radius: 0.5rem;
   overflow-x: auto;
   font-family: var(--font-mono);
@@ -320,7 +320,7 @@
   margin-top: 1rem;
   margin-bottom: 1rem;
   border: none;
-  border-top: 1px solid var(--color-border-default);
+  border-top: 0px solid var(--color-border-default);
 }
 .prose-sm a {
   color: var(--color-accent);
@@ -339,7 +339,7 @@
 }
 .prose-sm th, .prose-sm td {
   padding: 0.5rem 0.75rem;
-  border: 1px solid var(--color-border-default);
+  border: 0px solid var(--color-border-default);
   text-align: left;
 }
 .prose-sm th {

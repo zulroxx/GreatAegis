@@ -83,7 +83,7 @@ export default function GatewayOverview() {
           className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 px-4 py-2.5 rounded-lg text-xs animate-slide-up"
           style={{
             backgroundColor: "var(--color-bg-card)",
-            border: "1px solid var(--color-border-default)",
+            border: "0px solid var(--color-border-default)",
           }}
         >
           <div className="flex items-center gap-1.5">
@@ -196,7 +196,7 @@ export default function GatewayOverview() {
           className="rounded-lg p-8 flex flex-col items-center justify-center gap-3"
           style={{
             backgroundColor: "var(--color-bg-card)",
-            border: "1px solid var(--color-border-default)",
+            border: "0px solid var(--color-border-default)",
             minHeight: "300px",
           }}
         >
@@ -226,12 +226,12 @@ export default function GatewayOverview() {
               className="rounded-lg overflow-hidden"
               style={{
                 backgroundColor: "var(--color-bg-card)",
-                border: "1px solid var(--color-border-default)",
+                border: "0px solid var(--color-border-default)",
               }}
             >
               <div
                 className="px-5 py-3 flex items-center justify-between"
-                style={{ borderBottom: "1px solid var(--color-border-default)" }}
+                style={{ borderBottom: "0px solid var(--color-border-default)" }}
               >
                 <h3 className="text-sm font-semibold flex items-center gap-2" style={{ color: "var(--color-text-primary)" }}>
                   <ExternalLink size={15} style={{ color: "var(--color-accent)" }} />
@@ -255,7 +255,7 @@ export default function GatewayOverview() {
               {modelUsage && modelUsage.models.length > 0 ? (
                 <table className="w-full text-xs">
                   <thead>
-                    <tr style={{ borderBottom: "1px solid var(--color-border-default)" }}>
+                    <tr style={{ borderBottom: "0px solid var(--color-border-default)" }}>
                       <th className="text-left font-medium px-4 py-2.5" style={{ color: "var(--color-text-muted)" }}>Model</th>
                       <th className="text-right font-medium px-4 py-2.5" style={{ color: "var(--color-text-muted)" }}>Requests</th>
                       <th className="text-right font-medium px-4 py-2.5" style={{ color: "var(--color-text-muted)" }}>Prompt</th>
@@ -270,7 +270,7 @@ export default function GatewayOverview() {
                         key={m.model_id}
                         className="animate-slide-up"
                         style={{
-                          borderBottom: "1px solid var(--color-border-default)",
+                          borderBottom: "0px solid var(--color-border-default)",
                           animationDelay: `${idx * 50}ms`,
                         }}
                       >
@@ -331,7 +331,7 @@ export default function GatewayOverview() {
           className="rounded-lg p-8 flex flex-col items-center justify-center"
           style={{
             backgroundColor: "var(--color-bg-card)",
-            border: "1px solid var(--color-border-default)",
+            border: "0px solid var(--color-border-default)",
             minHeight: "300px",
           }}
         >

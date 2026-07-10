@@ -73,7 +73,7 @@ export default function App() {
 
         {/* Main Content Area — responsive margin */}
         <main
-          className="flex-1 overflow-y-auto p-4 sm:p-6 lg:ml-[220px]"
+          className={`flex-1 overflow-y-auto lg:ml-[220px] ${activeTab !== "workspace" ? "p-5" : ""}`}
           style={{
             backgroundColor: "var(--color-bg-base)",
             marginLeft: sidebarCollapsed ? "64px" : undefined,

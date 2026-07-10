@@ -21,7 +21,7 @@ export default function GPUPanel() {
         className="rounded-lg p-6 flex flex-col items-center justify-center gap-3"
         style={{
           backgroundColor: "var(--color-bg-card)",
-          border: "1px solid var(--color-border-default)",
+          border: "0px solid var(--color-border-default)",
         }}
       >
         <div
@@ -58,7 +58,7 @@ export default function GPUPanel() {
         className="rounded-lg p-6 flex flex-col items-center justify-center gap-3"
         style={{
           backgroundColor: "var(--color-bg-card)",
-          border: "1px solid var(--color-border-default)",
+          border: "0px solid var(--color-border-default)",
           minHeight: "120px",
         }}
       >
@@ -80,7 +80,7 @@ export default function GPUPanel() {
       className="rounded-lg p-5 animate-slide-up"
       style={{
         backgroundColor: "var(--color-bg-card)",
-        border: "1px solid var(--color-border-default)",
+        border: "0px solid var(--color-border-default)",
       }}
     >
       {/* ── Header ─────────────────────────────────────────── */}

@@ -28,16 +28,16 @@ export default function Header({ onToggleSidebar }: HeaderProps) {
 
   return (
     <header
-      className="fixed top-0 left-0 right-0 z-50 flex items-center h-14 px-3 sm:px-5"
+      className="fixed top-0 left-0 right-0 z-50 flex items-center h-14 px-2 sm:px-5"
       style={{
         backgroundColor: "var(--color-bg-sidebar)",
-        borderBottom: "1px solid var(--color-border-default)",
+        borderBottom: "0px solid var(--color-border-default)",
       }}
     >
       {/* ── Hamburger (mobile only) ─────────────────────────────── */}
       <button
         onClick={onToggleSidebar}
-        className="lg:hidden flex items-center justify-center w-8 h-8 mr-2 rounded-md cursor-pointer transition-all duration-150 active:scale-95"
+        className="lg:hidden flex items-center justify-center w-8 h-8 mr-1 sm:mr-2 rounded-md cursor-pointer transition-all duration-150 active:scale-95"
         style={{ color: "var(--color-text-secondary)" }}
         aria-label="Toggle navigation menu"
       >
@@ -45,7 +45,7 @@ export default function Header({ onToggleSidebar }: HeaderProps) {
       </button>
 
       {/* ── Brand ──────────────────────────────────────────────── */}
-      <div className="flex items-center gap-2.5 flex-shrink-0" style={{ minWidth: "180px" }}>
+      <div className="flex items-center gap-1.5 sm:gap-2.5 sm:flex-shrink-0">
         <Shield size={22} style={{ color: "var(--color-accent)" }} />
         <span className="text-base font-semibold tracking-tight select-none hidden sm:inline">
           GreatAegis
@@ -64,10 +64,10 @@ export default function Header({ onToggleSidebar }: HeaderProps) {
       {/* ── Zone switcher (center) ─────────────────────────────── */}
       <div className="flex-1 flex justify-center">
         <div
-          className="flex items-center gap-2 px-3 py-1.5 rounded-md text-xs select-none transition-all duration-150 hover:brightness-110 max-w-[260px] sm:max-w-none"
+          className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1.5 rounded-md text-xs select-none transition-all duration-150 hover:brightness-110 max-w-[220px] xs:max-w-[260px] sm:max-w-none"
           style={{
             backgroundColor: "var(--color-bg-base)",
-            border: "1px solid var(--color-border-default)",
+            border: "0px solid var(--color-border-default)",
             color: "var(--color-text-secondary)",
           }}
         >
@@ -83,14 +83,14 @@ export default function Header({ onToggleSidebar }: HeaderProps) {
       </div>
 
       {/* ── Right side controls ─────────────────────────────────── */}
-      <div className="flex items-center gap-2 sm:gap-3 ml-2">
+      <div className="flex items-center gap-1.5 sm:gap-3 ml-1 sm:ml-2">
         {/* Theme Toggle */}
         <button
           onClick={toggleTheme}
           className="flex items-center justify-center w-8 h-8 rounded-md cursor-pointer transition-all duration-150 active:scale-95"
           style={{
             backgroundColor: "var(--color-bg-base)",
-            border: "1px solid var(--color-border-default)",
+            border: "0px solid var(--color-border-default)",
             color: "var(--color-text-secondary)",
           }}
           aria-pressed={theme === "light"}

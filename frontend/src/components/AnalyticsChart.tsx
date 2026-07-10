@@ -41,7 +41,7 @@ export default function AnalyticsChart({ data }: AnalyticsChartProps) {
       className="rounded-lg p-5"
       style={{
         backgroundColor: "var(--color-bg-card)",
-        border: "1px solid var(--color-border-default)",
+        border: "0px solid var(--color-border-default)",
       }}
     >
       <h3 className="text-sm font-semibold mb-3" style={{ color: "var(--color-text-primary)" }}>

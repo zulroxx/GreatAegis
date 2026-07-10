@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
-import { LayoutDashboard, Shield, Waypoints, FlaskConical, Settings, ChevronLeft, ChevronDown, X, Briefcase, Plus, MessageSquare, Pencil, Trash2, Check, Globe } from "lucide-react";
+import { createPortal } from "react-dom";
+import { LayoutDashboard, Shield, Waypoints, FlaskConical, Settings, ChevronLeft, ChevronDown, X, Briefcase, Plus, MessageSquare, Pencil, Trash2, Check, Globe, MoreHorizontal, AlertTriangle } from "lucide-react";
 import { useChatHistory } from "../contexts/ChatHistoryContext";
 
 export type TabKey = "overview" | "security" | "proxy" | "routing-lab" | "workspace" | "settings";
@@ -51,6 +52,9 @@ export default function Sidebar({
   const [editTitle, setEditTitle] = useState("");
   const editInputRef = useRef<HTMLInputElement>(null);
   const [gatewayOpen, setGatewayOpen] = useState(false);
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+  const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
 
   useEffect(() => {
     if (editingId && editInputRef.current) {
@@ -58,6 +62,26 @@ export default function Sidebar({
       editInputRef.current.select();
     }
   }, [editingId]);
+
+  useEffect(() => {
+    if (!deleteTarget) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setDeleteTarget(null);
+    };
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [deleteTarget]);
+
+  useEffect(() => {
+    if (!menuOpenId) return;
+    const handleClick = (e: MouseEvent) => {
+      if ((e.target as Element)?.closest("[data-chat-context-menu]")) return;
+      setMenuOpenId(null);
+      setMenuPosition(null);
+    };
+    document.addEventListener("click", handleClick, true);
+    return () => document.removeEventListener("click", handleClick, true);
+  }, [menuOpenId]);
 
   const handleTabClick = (tab: TabKey) => {
     onTabChange(tab);
@@ -100,9 +124,14 @@ export default function Sidebar({
   };
 
   const handleDelete = (id: string, title: string) => {
-    if (window.confirm(`Delete "${title}"?`)) {
-      deleteConversation(id);
+    setDeleteTarget({ id, title });
+  };
+
+  const confirmDelete = () => {
+    if (deleteTarget) {
+      deleteConversation(deleteTarget.id);
     }
+    setDeleteTarget(null);
   };
 
   const chatHistorySection = (
@@ -182,7 +211,7 @@ export default function Sidebar({
                   <span className="truncate flex-1">{conv.title}</span>
 
                   <span
-                    className="hidden group-hover:flex items-center gap-0.5 flex-shrink-0"
+                    className="hidden lg:group-hover:flex items-center gap-0.5 flex-shrink-0"
                     onClick={(e) => e.stopPropagation()}
                   >
                     <button
@@ -212,6 +241,27 @@ export default function Sidebar({
                       <Trash2 size={10} />
                     </button>
                   </span>
+
+                  <div className="lg:hidden relative flex-shrink-0">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (menuOpenId === conv.id) {
+                          setMenuOpenId(null);
+                          setMenuPosition(null);
+                        } else {
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          setMenuOpenId(conv.id);
+                          setMenuPosition({ top: rect.bottom + 4, left: rect.right - 144 });
+                        }
+                      }}
+                      className="p-0.5 rounded cursor-pointer transition-colors"
+                      style={{ color: "var(--color-text-muted)" }}
+                      aria-label="Conversation menu"
+                    >
+                      <MoreHorizontal size={14} />
+                    </button>
+                  </div>
                 </button>
               )}
             </div>
@@ -227,7 +277,7 @@ export default function Sidebar({
       style={{
         width: collapsed ? "64px" : "var(--sidebar-width)",
         backgroundColor: "var(--color-bg-sidebar)",
-        borderRight: "1px solid var(--color-border-default)",
+        borderRight: "0px solid var(--color-border-default)",
       }}
       aria-label="Main navigation"
     >
@@ -320,7 +370,7 @@ export default function Sidebar({
       </nav>
 
       {!collapsed && conversations.length > 0 && (
-        <div className="mt-3 pt-3" style={{ borderTop: "1px solid var(--color-border-default)" }}>
+        <div className="mt-3 pt-3" style={{ borderTop: "0px solid var(--color-border-default)" }}>
           {chatHistorySection}
         </div>
       )}
@@ -371,7 +421,7 @@ export default function Sidebar({
         style={{
           width: "var(--sidebar-width)",
           backgroundColor: "var(--color-bg-sidebar)",
-          borderRight: "1px solid var(--color-border-default)",
+          borderRight: "0px solid var(--color-border-default)",
         }}
         aria-label="Mobile navigation"
       >
@@ -451,7 +501,7 @@ export default function Sidebar({
         </nav>
 
         {conversations.length > 0 && (
-          <div className="mt-3 pt-3" style={{ borderTop: "1px solid var(--color-border-default)" }}>
+          <div className="mt-3 pt-3" style={{ borderTop: "0px solid var(--color-border-default)" }}>
             {chatHistorySection}
           </div>
         )}
@@ -487,6 +537,108 @@ export default function Sidebar({
     <>
       {desktopSidebar}
       {mobileDrawer}
+
+      {menuOpenId && menuPosition && createPortal(
+        <div
+          data-chat-context-menu
+          className="fixed w-36 flex flex-col gap-0.5 p-1 rounded-lg shadow-lg z-50 text-xs"
+          style={{
+            top: menuPosition.top,
+            left: menuPosition.left,
+            backgroundColor: "var(--color-bg-card)",
+            border: "1px solid var(--color-border-light)",
+          }}
+        >
+          <button
+            onClick={() => {
+              setMenuOpenId(null);
+              setMenuPosition(null);
+              handleStartRename(menuOpenId, conversations.find((c) => c.id === menuOpenId)?.title ?? "");
+            }}
+            className="flex items-center gap-2 px-2.5 py-1.5 rounded text-left cursor-pointer transition-colors"
+            style={{ color: "var(--color-text-secondary)" }}
+            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "var(--color-bg-input)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; }}
+          >
+            <Pencil size={12} />
+            Edit Title
+          </button>
+          <button
+            onClick={() => {
+              const id = menuOpenId;
+              const title = conversations.find((c) => c.id === id)?.title ?? "";
+              setMenuOpenId(null);
+              setMenuPosition(null);
+              handleDelete(id, title);
+            }}
+            className="flex items-center gap-2 px-2.5 py-1.5 rounded text-left cursor-pointer transition-colors"
+            style={{ color: "var(--color-error)" }}
+            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "var(--color-error-dim)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; }}
+          >
+            <Trash2 size={12} />
+            Remove
+          </button>
+        </div>,
+        document.body,
+      )}
+
+      {deleteTarget && createPortal(
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center"
+          onClick={() => setDeleteTarget(null)}
+        >
+          <div className="absolute inset-0" style={{ backgroundColor: "rgba(0,0,0,0.5)" }} />
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="relative w-80 rounded-xl p-5 shadow-2xl text-sm flex flex-col gap-4"
+            style={{
+              backgroundColor: "var(--color-bg-card)",
+              border: "1px solid var(--color-border-light)",
+            }}
+          >
+            <div className="flex items-center gap-3">
+              <div
+                className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0"
+                style={{ backgroundColor: "var(--color-error-dim)", color: "var(--color-error)" }}
+              >
+                <AlertTriangle size={18} />
+              </div>
+              <div>
+                <p className="font-medium" style={{ color: "var(--color-text-primary)" }}>
+                  Delete Conversation
+                </p>
+                <p className="text-xs mt-0.5" style={{ color: "var(--color-text-muted)" }}>
+                  Are you sure you want to delete <strong style={{ color: "var(--color-text-primary)" }}>"{deleteTarget.title}"</strong>? This action cannot be undone.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                onClick={() => setDeleteTarget(null)}
+                className="px-4 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition-colors"
+                style={{
+                  backgroundColor: "var(--color-bg-input)",
+                  color: "var(--color-text-secondary)",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDelete}
+                className="px-4 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition-colors"
+                style={{
+                  backgroundColor: "var(--color-error)",
+                  color: "#fff",
+                }}
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
     </>
   );
 }

@@ -79,7 +79,7 @@ export default function ProxyMonitor({
       className="rounded-lg p-4 h-full relative overflow-hidden"
       style={{
         backgroundColor: "var(--color-bg-card)",
-        border: "1px solid var(--color-border-default)",
+        border: "0px solid var(--color-border-default)",
       }}
     >
       {/* Subtle grid background */}

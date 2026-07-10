@@ -331,7 +331,7 @@ export default function RoutingLab() {
             className="rounded-lg p-5"
             style={{
               backgroundColor: "var(--color-bg-card)",
-              border: "1px solid var(--color-border-default)",
+              border: "0px solid var(--color-border-default)",
             }}
           >
             <h2 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: "var(--color-text-primary)" }}>
@@ -357,7 +357,7 @@ export default function RoutingLab() {
             className="rounded-lg p-5"
             style={{
               backgroundColor: "var(--color-bg-card)",
-              border: "1px solid var(--color-border-default)",
+              border: "0px solid var(--color-border-default)",
             }}
           >
             <h2 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: "var(--color-text-primary)" }}>
@@ -370,7 +370,7 @@ export default function RoutingLab() {
                 className="w-full flex items-center justify-between px-4 py-2.5 rounded-md text-sm transition-all duration-150 cursor-pointer active:scale-[0.98]"
                 style={{
                   backgroundColor: "var(--color-bg-input)",
-                  border: "1px solid var(--color-border-default)",
+                  border: "0px solid var(--color-border-default)",
                   color: "var(--color-text-primary)",
                 }}
               >
@@ -388,7 +388,7 @@ export default function RoutingLab() {
                     className="absolute top-full left-0 right-0 mt-1 z-20 rounded-lg py-1 shadow-xl"
                     style={{
                       backgroundColor: "var(--color-bg-card)",
-                      border: "1px solid var(--color-border-default)",
+                      border: "0px solid var(--color-border-default)",
                     }}
                   >
                     {ROUTING_PROFILES.map((profile) => (
@@ -435,7 +435,7 @@ export default function RoutingLab() {
             className="rounded-lg p-5"
             style={{
               backgroundColor: "var(--color-bg-card)",
-              border: "1px solid var(--color-border-default)",
+              border: "0px solid var(--color-border-default)",
             }}
           >
             <h2 className="text-sm font-semibold mb-3" style={{ color: "var(--color-text-primary)" }}>
@@ -457,7 +457,7 @@ export default function RoutingLab() {
               className="w-full text-sm rounded-md px-4 py-3 resize-none transition-all duration-150"
               style={{
                 backgroundColor: "var(--color-bg-input)",
-                border: "1px solid var(--color-border-default)",
+                border: "0px solid var(--color-border-default)",
                 color: "var(--color-text-primary)",
                 fontFamily: "'Space Grotesk', sans-serif",
                 minHeight: "96px",
@@ -503,7 +503,7 @@ export default function RoutingLab() {
               className="rounded-lg flex flex-col items-center justify-center text-center p-10 min-h-[400px]"
               style={{
                 backgroundColor: "var(--color-bg-card)",
-                border: "1px solid var(--color-border-default)",
+                border: "0px solid var(--color-border-default)",
               }}
             >
               <div
@@ -530,7 +530,7 @@ export default function RoutingLab() {
               className="rounded-lg flex flex-col items-center justify-center text-center p-10 min-h-[400px]"
               style={{
                 backgroundColor: "var(--color-bg-card)",
-                border: "1px solid var(--color-border-default)",
+                border: "0px solid var(--color-border-default)",
               }}
             >
               <div
@@ -629,12 +629,12 @@ export default function RoutingLab() {
                     className="rounded-md overflow-hidden"
                     style={{
                       backgroundColor: "var(--color-bg-input)",
-                      border: "1px solid var(--color-border-default)",
+                      border: "0px solid var(--color-border-default)",
                     }}
                   >
                     <table className="w-full text-xs">
                       <thead>
-                        <tr style={{ borderBottom: "1px solid var(--color-border-default)" }}>
+                        <tr style={{ borderBottom: "0px solid var(--color-border-default)" }}>
                           <th className="text-left font-medium px-3 py-2" style={{ color: "var(--color-text-muted)" }}>Condition</th>
                           <th className="text-right font-medium px-3 py-2" style={{ color: "var(--color-text-muted)" }}>Value</th>
                           <th className="text-right font-medium px-3 py-2 w-8" style={{ color: "var(--color-text-muted)" }}>Pass?</th>

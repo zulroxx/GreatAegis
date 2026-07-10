@@ -77,7 +77,7 @@ export default function SecuritySuite() {
         className="flex items-center gap-4 px-4 py-2.5 rounded-lg text-xs animate-slide-up"
         style={{
           backgroundColor: "var(--color-bg-card)",
-          border: "1px solid var(--color-border-default)",
+          border: "0px solid var(--color-border-default)",
         }}
       >
         <div className="flex items-center gap-1.5">
@@ -127,7 +127,7 @@ export default function SecuritySuite() {
         className="rounded-lg p-5"
         style={{
           backgroundColor: "var(--color-bg-card)",
-          border: "1px solid var(--color-border-default)",
+          border: "0px solid var(--color-border-default)",
         }}
       >
         <h2 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: "var(--color-text-primary)" }}>
@@ -152,10 +152,10 @@ export default function SecuritySuite() {
         className="rounded-lg overflow-hidden"
         style={{
           backgroundColor: "var(--color-bg-card)",
-          border: "1px solid var(--color-border-default)",
+          border: "0px solid var(--color-border-default)",
         }}
       >
-        <div className="px-5 py-3 flex items-center justify-between" style={{ borderBottom: "1px solid var(--color-border-default)" }}>
+        <div className="px-5 py-3 flex items-center justify-between" style={{ borderBottom: "0px solid var(--color-border-default)" }}>
           <h2 className="text-sm font-semibold flex items-center gap-2" style={{ color: "var(--color-text-primary)" }}>
             <Shield size={16} style={{ color: "var(--color-accent)" }} />
             Threat Capture Log Explorer
@@ -187,7 +187,7 @@ export default function SecuritySuite() {
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
-                <tr style={{ borderBottom: "1px solid var(--color-border-default)" }}>
+                <tr style={{ borderBottom: "0px solid var(--color-border-default)" }}>
                   <th className="text-left font-medium px-4 py-2.5 w-8" style={{ color: "var(--color-text-muted)" }}></th>
                   <th className="text-left font-medium px-4 py-2.5" style={{ color: "var(--color-text-muted)" }}>Timestamp</th>
                   <th className="text-left font-medium px-4 py-2.5" style={{ color: "var(--color-text-muted)" }}>File Name</th>
@@ -200,7 +200,7 @@ export default function SecuritySuite() {
                 {logs.map((entry, idx) => {
                   const isExpanded = expandedRows.has(entry.id);
                   return (
-                    <tr key={entry.id} className="animate-slide-up" style={{ borderBottom: "1px solid var(--color-border-default)", animationDelay: `${idx * 30}ms` }}>
+                    <tr key={entry.id} className="animate-slide-up" style={{ borderBottom: "0px solid var(--color-border-default)", animationDelay: `${idx * 30}ms` }}>
                       <td className="px-4 py-3">
                         <button
                           onClick={() => toggleRow(entry.id)}
@@ -250,7 +250,7 @@ export default function SecuritySuite() {
                   className="px-10 py-3 animate-slide-down"
                   style={{
                     backgroundColor: "var(--color-bg-input)",
-                    borderBottom: "1px solid var(--color-border-default)",
+                    borderBottom: "0px solid var(--color-border-default)",
                   }}
                 >
                   <p className="text-xs mb-1" style={{ color: "var(--color-text-muted)" }}>

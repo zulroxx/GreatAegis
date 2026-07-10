@@ -1,16 +1,17 @@
 import { useState, useRef, useCallback, useEffect } from "react";
+import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import rehypeSanitize from "rehype-sanitize";
 import {
   Send,
   Paperclip,
   Loader2,
-  User,
   Shield,
   AlertTriangle,
   CheckCircle2,
   Copy,
   Check,
+  ChevronDown,
 } from "lucide-react";
 import type { ChatRoutingInfo, ChatMessage } from "../types/api";
 import { useChatHistory } from "../contexts/ChatHistoryContext";
@@ -192,11 +193,14 @@ export default function EnterpriseChatWorkspace() {
   const [podWarning, setPodWarning] = useState<string | null>(null);
   const [attachedFile, setAttachedFile] = useState<{ name: string; content: string } | null>(null);
   const [fileProcessing, setFileProcessing] = useState(false);
+  const [showScrollButton, setShowScrollButton] = useState(false);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const userScrolledUpRef = useRef(false);
+  const prevShowRef = useRef(false);
 
   useEffect(() => {
     apiFetch(`/api/v1/gateway/key-status`)
@@ -206,8 +210,46 @@ export default function EnterpriseChatWorkspace() {
   }, []);
 
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    chatEndRef.current?.scrollIntoView({ behavior: "auto" });
+  }, []);
+
+  useEffect(() => {
+    const main = document.querySelector("main");
+    if (!main) return;
+
+    let ticking = false;
+    const THRESHOLD = 96;
+
+    const handleScroll = () => {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(() => {
+        const { scrollTop, scrollHeight, clientHeight } = main;
+        const distFromBottom = scrollHeight - scrollTop - clientHeight;
+        const scrolledUp = distFromBottom > THRESHOLD;
+        userScrolledUpRef.current = scrolledUp;
+        if (scrolledUp !== prevShowRef.current) {
+          prevShowRef.current = scrolledUp;
+          setShowScrollButton(scrolledUp);
+        }
+        ticking = false;
+      });
+    };
+
+    main.addEventListener("scroll", handleScroll, { passive: true });
+    handleScroll();
+    return () => main.removeEventListener("scroll", handleScroll);
+  }, []);
+
+  useEffect(() => {
+    if (!userScrolledUpRef.current) {
+      chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
   }, [messages]);
+
+  const scrollToBottom = useCallback(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, []);
 
   const handleInput = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInput(e.target.value);
@@ -392,79 +434,42 @@ export default function EnterpriseChatWorkspace() {
   const isEmpty = messages.length === 0;
 
   return (
-    <div
-      className="rounded-xl flex flex-col flex-1 min-h-0"
-      style={{
-        backgroundColor: "var(--color-bg-card)",
-        border: "1px solid var(--color-border-default)",
-      }}
-    >
-      {/* ── Workspace Header Bar ─────────────────────────────── */}
-      <div
-        className="flex items-center justify-between px-5 py-3 rounded-t-xl"
-        style={{
-          borderBottom: "1px solid var(--color-border-default)",
-        }}
-      >
-        <div className="flex items-center gap-3">
-          <div
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium"
+    <>
+      {/* ── Floating Badges ─────────────────────────────────── */}
+      <div className="sticky top-0 z-10" style={{ backgroundColor: "var(--color-bg-base)" }}>
+        <div className="flex items-center gap-3 px-5 pt-4 pb-2">
+        <div
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium"
+          style={{
+            backgroundColor: keyConnected
+              ? "var(--color-accent-dim)"
+              : "rgba(221, 107, 32, 0.1)",
+            color: keyConnected ? "var(--color-success)" : "var(--color-warning)",
+          }}
+        >
+          <span
+            className="w-1.5 h-1.5 rounded-full"
             style={{
               backgroundColor: keyConnected
-                ? "var(--color-accent-dim)"
-                : "rgba(221, 107, 32, 0.1)",
-              border: `1px solid ${
-                keyConnected
-                  ? "color-mix(in srgb, var(--color-accent) 30%, transparent)"
-                  : "rgba(221, 107, 32, 0.4)"
-              }`,
-              color: keyConnected ? "var(--color-success)" : "var(--color-warning)",
+                ? "var(--color-success)"
+                : "var(--color-warning)",
+              animation: "pulse-green 2s ease-in-out infinite",
             }}
-          >
-            <span
-              className="w-1.5 h-1.5 rounded-full"
-              style={{
-                backgroundColor: keyConnected
-                  ? "var(--color-success)"
-                  : "var(--color-warning)",
-                animation: "pulse-green 2s ease-in-out infinite",
-              }}
-            />
-            {keyConnected ? "Gateway Live" : "Demo Mode"}
-          </div>
-
-          <div
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium"
-            style={{
-              backgroundColor: "var(--color-bg-input)",
-              border: "1px solid var(--color-border-light)",
-              color: "var(--color-text-muted)",
-            }}
-          >
-            <Shield size={11} />
-            <span>Auto-Routed</span>
-          </div>
+          />
+          {keyConnected ? "Gateway Live" : "Demo Mode"}
         </div>
 
         <div
-          className="flex items-center gap-2 px-2.5 py-1.5 rounded-full text-xs font-medium cursor-pointer transition-all duration-150 active:scale-95 select-none"
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium"
           style={{
             backgroundColor: "var(--color-bg-input)",
-            border: "1px solid var(--color-border-light)",
-            color: "var(--color-text-secondary)",
+            color: "var(--color-text-muted)",
           }}
         >
-          <div
-            className="w-6 h-6 rounded-full flex items-center justify-center"
-            style={{
-              backgroundColor: "var(--color-accent)",
-              color: "#000",
-            }}
-          >
-            <User size={14} />
-          </div>
-          Sovereignty Admin
+          <Shield size={11} />
+          <span>Auto-Routed</span>
         </div>
+      </div>
       </div>
 
       {/* ── Error banner ──────────────────────────────────────── */}
@@ -473,7 +478,6 @@ export default function EnterpriseChatWorkspace() {
           className="flex items-center gap-2 px-5 py-2.5 text-xs"
           style={{
             backgroundColor: "var(--color-error-dim)",
-            borderBottom: "1px solid var(--color-error)",
             color: "var(--color-error)",
           }}
         >
@@ -494,7 +498,6 @@ export default function EnterpriseChatWorkspace() {
           className="mx-5 mt-3 rounded-lg px-4 py-3 text-xs leading-relaxed flex items-start gap-2.5 animate-bounce-in"
           style={{
             backgroundColor: "rgba(221, 107, 32, 0.1)",
-            border: "1px solid rgba(221, 107, 32, 0.4)",
             color: "var(--color-warning)",
           }}
         >
@@ -507,7 +510,7 @@ export default function EnterpriseChatWorkspace() {
       )}
 
       {/* ── Chat / Greeting Area ─────────────────────────────── */}
-      <div className="flex-1 overflow-y-auto px-5 py-6" style={{ maxHeight: "calc(100vh - 300px)" }}>
+      <div className="px-5 py-6">
         {isEmpty ? (
           <div className="flex flex-col items-center justify-center h-full text-center">
             <div className="max-w-3xl">
@@ -557,16 +560,13 @@ export default function EnterpriseChatWorkspace() {
                     className="flex items-center justify-center px-4 py-4 rounded-xl text-center text-xs leading-tight transition-all duration-150 cursor-pointer group animate-slide-up"
                     style={{
                       backgroundColor: "var(--color-bg-input)",
-                      border: "1px solid var(--color-border-default)",
                       color: "var(--color-text-secondary)",
                       animationDelay: `${300 + idx * 100}ms`,
                     }}
                     onMouseEnter={(e) => {
-                      e.currentTarget.style.borderColor = "var(--color-accent)";
                       e.currentTarget.style.backgroundColor = "color-mix(in srgb, var(--color-accent) 4%, transparent)";
                     }}
                     onMouseLeave={(e) => {
-                      e.currentTarget.style.borderColor = "var(--color-border-default)";
                       e.currentTarget.style.backgroundColor = "var(--color-bg-input)";
                     }}
                   >
@@ -588,11 +588,6 @@ export default function EnterpriseChatWorkspace() {
                         backgroundColor: msg.routing.fallback_engaged
                           ? "rgba(221, 107, 32, 0.1)"
                           : "var(--color-accent-dim)",
-                        border: `1px solid ${
-                          msg.routing.fallback_engaged
-                            ? "rgba(221, 107, 32, 0.3)"
-                            : "color-mix(in srgb, var(--color-accent) 30%, transparent)"
-                        }`,
                         color: msg.routing.fallback_engaged
                           ? "var(--color-warning)"
                           : "var(--color-success)",
@@ -609,7 +604,6 @@ export default function EnterpriseChatWorkspace() {
                       <div className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[9px]"
                         style={{
                           backgroundColor: "var(--color-bg-input)",
-                          border: "1px solid var(--color-border-light)",
                           color: "var(--color-text-muted)",
                         }}
                       >
@@ -648,7 +642,7 @@ export default function EnterpriseChatWorkspace() {
                 )}
 
                 <div
-                  className={`px-4 py-3 rounded-xl text-sm leading-relaxed animate-fade-in ${
+                  className={`px-4 py-3 rounded text-sm leading-relaxed animate-fade-in ${
                     msg.role === "user" ? "self-end" : "self-start"
                   }`}
                   style={{
@@ -656,11 +650,6 @@ export default function EnterpriseChatWorkspace() {
                       msg.role === "user"
                         ? "var(--color-accent-glow)"
                         : "var(--color-bg-input)",
-                    border: `1px solid ${
-                      msg.role === "user"
-                        ? "color-mix(in srgb, var(--color-accent) 20%, transparent)"
-                        : "var(--color-border-light)"
-                    }`,
                     color: "var(--color-text-primary)",
                     maxWidth: "85%",
                     whiteSpace: msg.role === "user" ? "pre-wrap" : "normal",
@@ -672,7 +661,6 @@ export default function EnterpriseChatWorkspace() {
                       className="flex items-center gap-2 mb-2 px-2.5 py-1.5 rounded-lg text-xs"
                       style={{
                         backgroundColor: "var(--color-bg-input)",
-                        border: "1px solid var(--color-border-light)",
                       }}
                     >
                       <Paperclip size={11} style={{ color: "var(--color-accent)" }} />
@@ -710,14 +698,9 @@ export default function EnterpriseChatWorkspace() {
         )}
       </div>
 
-      {/* ── Input Area ─────────────────────────────────────────── */}
-      <div
-        className="px-4 py-3 rounded-b-xl"
-        style={{
-          borderTop: "1px solid var(--color-border-default)",
-          marginTop: "auto",
-        }}
-      >
+      {/* ── Floating Input Area ────────────────────────────────── */}
+      <div className="sticky bottom-0 z-10" style={{ backgroundColor: "var(--color-bg-base)" }}>
+      <div className="px-4 pb-4 pt-2">
         {/* File processing indicator */}
         {fileProcessing && (
           <div className="mb-2 flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs" style={{ color: "var(--color-text-muted)" }}>
@@ -733,7 +716,6 @@ export default function EnterpriseChatWorkspace() {
               className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs"
               style={{
                 backgroundColor: "var(--color-accent-dim)",
-                border: "1px solid color-mix(in srgb, var(--color-accent) 30%, transparent)",
                 color: "var(--color-accent)",
               }}
             >
@@ -751,7 +733,6 @@ export default function EnterpriseChatWorkspace() {
               style={{
                 backgroundColor: "var(--color-error-dim)",
                 color: "var(--color-error)",
-                border: "1px solid rgba(255, 82, 82, 0.3)",
               }}
               aria-label="Remove attached file"
             >
@@ -761,12 +742,11 @@ export default function EnterpriseChatWorkspace() {
         )}
 
         <div
-          className="flex items-center gap-2 px-4 py-2.5 rounded-2xl"
+          className="flex items-center gap-2 px-4 py-2.5 rounded-2xl shadow-lg"
           style={{
             backgroundColor: "color-mix(in srgb, var(--color-bg-input) 85%, transparent)",
             backdropFilter: "blur(12px)",
             WebkitBackdropFilter: "blur(12px)",
-            border: "1px solid var(--color-border-light)",
           }}
         >
           <button
@@ -860,7 +840,23 @@ export default function EnterpriseChatWorkspace() {
             : " External fallback permitted."}
         </p>
       </div>
-    </div>
+      </div>
+
+      {showScrollButton && createPortal(
+        <button
+          onClick={scrollToBottom}
+          className="fixed bottom-28 right-5 sm:right-8 w-9 h-9 flex items-center justify-center rounded-full shadow-lg cursor-pointer transition-all duration-150 active:scale-90 z-30"
+          style={{
+            backgroundColor: "var(--color-accent)",
+            color: "#000",
+          }}
+          aria-label="Scroll to bottom"
+        >
+          <ChevronDown size={18} />
+        </button>,
+        document.body,
+      )}
+    </>
   );
 }
 
@@ -890,13 +886,11 @@ function CodeBlock({ children, className }: { children: React.ReactNode; classNa
   return (
     <div
       className="rounded-lg overflow-hidden my-2"
-      style={{ border: "1px solid var(--color-border-default)" }}
     >
       <div
         className="flex items-center justify-between px-3 py-1.5 text-[10px] select-none"
         style={{
           backgroundColor: "var(--color-bg-base)",
-          borderBottom: "1px solid var(--color-border-light)",
           color: "var(--color-text-muted)",
         }}
       >
@@ -939,7 +933,6 @@ const markdownComponents = {
           background: "var(--color-bg-base)",
           padding: "0.125rem 0.375rem",
           borderRadius: "0.25rem",
-          border: "1px solid var(--color-border-light)",
           color: "var(--color-accent)",
         }}
         {...props}

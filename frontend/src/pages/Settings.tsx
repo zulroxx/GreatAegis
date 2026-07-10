@@ -25,7 +25,7 @@ import {
 } from "lucide-react";
 import { useTheme } from "../contexts/ThemeContext";
 import { apiFetch } from "../utils/api";
-import type { SystemMetricsResponse } from "../types/api";
+import type { SystemMetricsResponse, LogEntry } from "../types/api";
 
 const POLLING_OPTIONS = [
   { label: "2 seconds", value: 2000 },
@@ -98,7 +98,7 @@ function SettingRow({ icon, label, description, children }: SettingRowProps) {
   return (
     <div
       className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-6 py-4 px-5 animate-slide-up"
-      style={{ borderBottom: "1px solid var(--color-border-default)" }}
+      style={{ borderBottom: "0px solid var(--color-border-default)" }}
     >
       <div className="flex items-start gap-3 flex-1 min-w-0">
         <span className="mt-0.5 flex-shrink-0" style={{ color: "var(--color-accent)" }}>
@@ -146,6 +146,10 @@ export default function SettingsPage() {
   const [sysMetrics, setSysMetrics] = useState<SystemMetricsResponse | null>(null);
   const [sysLoading, setSysLoading] = useState(false);
   const [sysError, setSysError] = useState<string | null>(null);
+
+  const [threatLogs, setThreatLogs] = useState<LogEntry[]>([]);
+  const [threatLogsLoading, setThreatLogsLoading] = useState(false);
+  const [threatLogsError, setThreatLogsError] = useState<string | null>(null);
 
   useEffect(() => {
     const storedModel = localStorage.getItem(MODEL_STORAGE_KEY);
@@ -324,6 +328,31 @@ export default function SettingsPage() {
     }
   };
 
+  const fetchThreatLogs = async () => {
+    setThreatLogsLoading(true);
+    setThreatLogsError(null);
+    try {
+      const res = await apiFetch(`/api/v1/gateway/logs`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json: LogEntry[] = await res.json();
+      setThreatLogs(json);
+    } catch (err) {
+      setThreatLogsError(err instanceof Error ? err.message : "Failed to fetch logs");
+      setThreatLogs([]);
+    } finally {
+      setThreatLogsLoading(false);
+    }
+  };
+
+  const clearThreatLogs = async () => {
+    try {
+      await apiFetch(`/api/v1/gateway/logs`, { method: "DELETE" });
+    } catch {
+      // ignore
+    }
+    setThreatLogs([]);
+  };
+
   const handleResetDefaults = () => {
     setPollingInterval(5000);
     setTheme("dark");
@@ -354,7 +383,7 @@ export default function SettingsPage() {
           className="rounded-xl p-8 w-full max-w-sm animate-slide-up"
           style={{
             backgroundColor: "var(--color-bg-card)",
-            border: "1px solid var(--color-border-default)",
+            border: "0px solid var(--color-border-default)",
           }}
         >
           <div className="flex flex-col items-center gap-4">
@@ -444,7 +473,7 @@ export default function SettingsPage() {
           style={{
             backgroundColor: "var(--color-bg-card)",
             color: "var(--color-text-muted)",
-            border: "1px solid var(--color-border-default)",
+            border: "0px solid var(--color-border-default)",
           }}
           aria-label="Reset settings to defaults"
         >
@@ -458,12 +487,12 @@ export default function SettingsPage() {
         className="rounded-lg overflow-hidden animate-slide-up"
         style={{
           backgroundColor: "var(--color-bg-card)",
-          border: "1px solid var(--color-border-default)",
+          border: "0px solid var(--color-border-default)",
         }}
       >
         <div
           className="px-5 py-3 flex items-center justify-between"
-          style={{ borderBottom: "1px solid var(--color-border-default)" }}
+          style={{ borderBottom: "0px solid var(--color-border-default)" }}
         >
           <h2 className="text-sm font-semibold flex items-center gap-2" style={{ color: "var(--color-text-primary)" }}>
             <Settings size={16} style={{ color: "var(--color-accent)" }} />
@@ -505,7 +534,7 @@ export default function SettingsPage() {
             style={{
               backgroundColor: "var(--color-bg-input)",
               color: "var(--color-text-primary)",
-              border: "1px solid var(--color-border-default)",
+              border: "0px solid var(--color-border-default)",
             }}
           >
             {POLLING_OPTIONS.map((opt) => (
@@ -529,7 +558,7 @@ export default function SettingsPage() {
             style={{
               backgroundColor: "var(--color-bg-input)",
               color: "var(--color-text-primary)",
-              border: "1px solid var(--color-border-default)",
+              border: "0px solid var(--color-border-default)",
             }}
           >
             <option value="dark">Dark — Deep Space</option>
@@ -568,13 +597,13 @@ export default function SettingsPage() {
         className="rounded-lg overflow-hidden animate-slide-up"
         style={{
           backgroundColor: "var(--color-bg-card)",
-          border: "1px solid var(--color-border-default)",
+          border: "0px solid var(--color-border-default)",
           animationDelay: "80ms",
         }}
       >
         <div
           className="px-5 py-3 flex items-center"
-          style={{ borderBottom: "1px solid var(--color-border-default)" }}
+          style={{ borderBottom: "0px solid var(--color-border-default)" }}
         >
           <h2 className="text-sm font-semibold flex items-center gap-2" style={{ color: "var(--color-text-primary)" }}>
             <Shield size={16} style={{ color: "var(--color-accent-amber)" }} />
@@ -640,7 +669,7 @@ export default function SettingsPage() {
             style={{
               backgroundColor: "var(--color-bg-input)",
               color: "var(--color-text-primary)",
-              border: "1px solid var(--color-border-default)",
+              border: "0px solid var(--color-border-default)",
             }}
           >
             <option value="default">Default (latency-optimized)</option>
@@ -650,18 +679,113 @@ export default function SettingsPage() {
         </SettingRow>
       </div>
 
-      {/* ── System Health Card ──────────────────────────────────── */}
+      {/* ── Threat Capture Log Explorer Card ──────────────────── */}
       <div
         className="rounded-lg overflow-hidden animate-slide-up"
         style={{
           backgroundColor: "var(--color-bg-card)",
-          border: "1px solid var(--color-border-default)",
+          border: "0px solid var(--color-border-default)",
           animationDelay: "80ms",
         }}
       >
         <div
           className="px-5 py-3 flex items-center justify-between"
-          style={{ borderBottom: "1px solid var(--color-border-default)" }}
+          style={{ borderBottom: "0px solid var(--color-border-default)" }}
+        >
+          <h2 className="text-sm font-semibold flex items-center gap-2" style={{ color: "var(--color-text-primary)" }}>
+            <Shield size={16} style={{ color: "var(--color-accent-amber)" }} />
+            Threat Capture Log Explorer
+          </h2>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={clearThreatLogs}
+              disabled={threatLogs.length === 0}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium cursor-pointer transition-all duration-150 active:scale-95 hover:brightness-125"
+              style={{
+                backgroundColor: "var(--color-error-dim)",
+                color: "var(--color-error)",
+                border: "1px solid rgba(255, 82, 82, 0.3)",
+                opacity: threatLogs.length === 0 ? 0.4 : 1,
+              }}
+              title="Clear all logs"
+            >
+              <Trash2 size={12} />
+              Clear
+            </button>
+            <button
+              onClick={fetchThreatLogs}
+              disabled={threatLogsLoading}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium cursor-pointer transition-all duration-150 active:scale-95 hover:brightness-125"
+              style={{
+                backgroundColor: "var(--color-accent-glow)",
+                color: "var(--color-accent)",
+                border: "1px solid rgba(0, 230, 118, 0.3)",
+                opacity: threatLogsLoading ? 0.6 : 1,
+              }}
+            >
+              <RefreshCw size={12} className={threatLogsLoading ? "animate-spin" : ""} />
+              Refresh
+            </button>
+          </div>
+        </div>
+
+        {threatLogsError ? (
+          <div className="px-5 py-4 text-xs" style={{ color: "var(--color-error)" }}>
+            <p>Failed to fetch threat logs — {threatLogsError}</p>
+          </div>
+        ) : threatLogs.length === 0 ? (
+          <div className="px-5 py-4 text-xs text-center" style={{ color: "var(--color-text-muted)" }}>
+            <p>No threat capture events recorded yet. Logs appear here as routing decisions and security events occur.</p>
+          </div>
+        ) : (
+          <div className="max-h-64 overflow-y-auto">
+            {threatLogs.map((entry) => {
+              const summary = entry.ciphertext || `${entry.classification} event`;
+              const isWarning = summary.toLowerCase().includes("fallback") || summary.toLowerCase().includes("error") || summary.toLowerCase().includes("failed");
+
+              return (
+                <div
+                  key={entry.id}
+                  className="flex items-start gap-3 px-5 py-2.5 text-xs"
+                  style={{
+                    borderBottom: "1px solid var(--color-border-light)",
+                    backgroundColor: isWarning ? "rgba(221, 107, 32, 0.04)" : "transparent",
+                  }}
+                >
+                  <span className="font-mono text-[10px] flex-shrink-0 mt-0.5" style={{ color: "var(--color-text-muted)" }}>
+                    {new Date(entry.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                  </span>
+                  <span
+                    className="font-mono text-[10px] flex-shrink-0 mt-0.5 px-1.5 py-0.5 rounded uppercase font-medium"
+                    style={{
+                      backgroundColor: isWarning ? "rgba(221, 107, 32, 0.15)" : "var(--color-accent-dim)",
+                      color: isWarning ? "var(--color-warning)" : "var(--color-accent)",
+                    }}
+                  >
+                    {entry.classification}
+                  </span>
+                  <span className="flex-1 truncate" style={{ color: isWarning ? "var(--color-warning)" : "var(--color-text-secondary)" }}>
+                    {summary}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* ── System Health Card ──────────────────────────────────── */}
+      <div
+        className="rounded-lg overflow-hidden animate-slide-up"
+        style={{
+          backgroundColor: "var(--color-bg-card)",
+          border: "0px solid var(--color-border-default)",
+          animationDelay: "80ms",
+        }}
+      >
+        <div
+          className="px-5 py-3 flex items-center justify-between"
+          style={{ borderBottom: "0px solid var(--color-border-default)" }}
         >
           <h2 className="text-sm font-semibold flex items-center gap-2" style={{ color: "var(--color-text-primary)" }}>
             <Cpu size={16} style={{ color: "var(--color-accent)" }} />
@@ -751,13 +875,13 @@ export default function SettingsPage() {
         className="rounded-lg overflow-hidden animate-slide-up"
         style={{
           backgroundColor: "var(--color-bg-card)",
-          border: "1px solid var(--color-border-default)",
+          border: "0px solid var(--color-border-default)",
           animationDelay: "80ms",
         }}
       >
         <div
           className="px-5 py-3 flex items-center justify-between"
-          style={{ borderBottom: "1px solid var(--color-border-default)" }}
+          style={{ borderBottom: "0px solid var(--color-border-default)" }}
         >
           <h2 className="text-sm font-semibold flex items-center gap-2" style={{ color: "var(--color-text-primary)" }}>
             <ExternalLink size={16} style={{ color: "var(--color-accent)" }} />
@@ -848,7 +972,7 @@ export default function SettingsPage() {
                         style={{
                           backgroundColor: "var(--color-bg-input)",
                           color: "var(--color-text-primary)",
-                          border: "1px solid var(--color-border-default)",
+                          border: "0px solid var(--color-border-default)",
                         }}
                       >
                         {MODEL_OPTIONS.map((opt, idx) => (
@@ -864,7 +988,7 @@ export default function SettingsPage() {
                         style={{
                           backgroundColor: "var(--color-bg-input)",
                           color: "var(--color-text-primary)",
-                          border: "1px solid var(--color-border-default)",
+                          border: "0px solid var(--color-border-default)",
                         }}
                       >
                         {currentPaths.map((p) => (
@@ -917,7 +1041,7 @@ export default function SettingsPage() {
                     style={{
                       backgroundColor: "var(--color-bg-input)",
                       color: "var(--color-text-secondary)",
-                      border: "1px solid var(--color-border-default)",
+                      border: "0px solid var(--color-border-default)",
                       opacity: !fireworksKey.trim() || testing ? 0.5 : 1,
                     }}
                   >
@@ -991,7 +1115,7 @@ export default function SettingsPage() {
         className="rounded-lg p-5 animate-slide-up"
         style={{
           backgroundColor: "var(--color-bg-card)",
-          border: "1px solid var(--color-border-default)",
+          border: "0px solid var(--color-border-default)",
           animationDelay: "160ms",
         }}
       >

@@ -68,7 +68,7 @@ export default function SecurePromptTerminal({
       className="rounded-lg flex flex-col h-full"
       style={{
         backgroundColor: "var(--color-bg-input)",
-        border: "1px solid var(--color-border-default)",
+        border: "0px solid var(--color-border-default)",
         fontFamily: 'ui-monospace, "SF Mono", "Fira Code", "Courier New", monospace',
       }}
     >
@@ -77,7 +77,7 @@ export default function SecurePromptTerminal({
         className="flex items-center gap-2 px-4 py-2.5 rounded-t-lg"
         style={{
           backgroundColor: "var(--color-bg-input)",
-          borderBottom: "1px solid var(--color-border-default)",
+          borderBottom: "0px solid var(--color-border-default)",
         }}
       >
         <Terminal size={14} style={{ color: "var(--color-accent)" }} />
@@ -271,7 +271,7 @@ export default function SecurePromptTerminal({
         className="px-4 py-1.5 text-xs rounded-b-lg"
         style={{
           backgroundColor: "var(--color-bg-input)",
-          borderTop: "1px solid var(--color-border-default)",
+          borderTop: "0px solid var(--color-border-default)",
           color: "var(--color-text-secondary)",
         }}
       >

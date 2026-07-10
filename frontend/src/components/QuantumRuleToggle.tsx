@@ -44,7 +44,7 @@ export default function QuantumRuleToggle({
       className="flex items-center justify-between px-4 py-3 rounded-md transition-all duration-150 hover:brightness-110 active:scale-[0.98]"
       style={{
         backgroundColor: "var(--color-bg-base)",
-        border: "1px solid var(--color-border-default)",
+        border: "0px solid var(--color-border-default)",
       }}
     >
       <div className="flex flex-col gap-0.5 min-w-0 flex-1 mr-3">
