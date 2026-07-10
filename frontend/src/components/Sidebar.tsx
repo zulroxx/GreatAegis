@@ -50,7 +50,7 @@ export default function Sidebar({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const editInputRef = useRef<HTMLInputElement>(null);
-  const [gatewayOpen, setGatewayOpen] = useState(true);
+  const [gatewayOpen, setGatewayOpen] = useState(false);
 
   useEffect(() => {
     if (editingId && editInputRef.current) {
