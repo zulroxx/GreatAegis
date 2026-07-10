@@ -16,7 +16,7 @@ import { useChatHistory } from "../contexts/ChatHistoryContext";
 import { extractTextFromFile } from "../utils/fileTextExtractor";
 import { encapsulatePrompt } from "../utils/pqc-client";
 
-const API_BASE = "http://localhost:8060";
+const API_BASE = import.meta.env.VITE_API_BASE_URL;
 
 const SUGGESTIONS = [
   "Explain quantum-resistant cryptography in simple terms",

@@ -1,0 +1,112 @@
+#cloud-config
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# GreatAegis vLLM Inference Server — GPU Droplet Startup
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Drop this in the "Startup scripts" box when creating a DO GPU Droplet
+# with the vLLM / ROCm image.
+#
+# Swap MODEL_ID for Mixtral-8x7B if needed (see comments at MODEL_ID lines).
+
+package_update: true
+package_upgrade: false
+
+write_files:
+
+  # ── Environment file (single source of truth for model config) ──────────
+  - path: /etc/vllm.env
+    permissions: '0644'
+    content: |
+      # Model to serve.  ─── CHANGE THIS FOR DIFFERENT MODELS ───
+      #   google/gemma-7b-it       (ungated, ~15 GB)
+      #   mistralai/Mixtral-8x7B-Instruct-v0.1  (gated, ~50 GB, needs HF_TOKEN below)
+      MODEL_ID='google/gemma-7b-it'
+      MODEL_PATH='/mnt/models/gemma-7b-it'
+      HF_HOME='/mnt/models'
+      VLLM_PORT='8000'
+
+      # Uncomment for gated models (Mixtral, Llama, etc.)
+      # HF_TOKEN='hf_your_token_here'
+
+  # ── systemd unit — survives reboots, auto-restarts on crash ─────────────
+  - path: /etc/systemd/system/vllm.service
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=GreatAegis vLLM Inference Server
+      Documentation=https://docs.vllm.ai/
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=simple
+      User=root
+      Group=root
+      EnvironmentFile=/etc/vllm.env
+      WorkingDirectory=/tmp
+
+      ExecStartPre=/bin/sh -c '\
+        if [ ! -d "$${MODEL_PATH}" ]; then \
+          echo "[vllm] FATAL: model directory $${MODEL_PATH} not found — run model download first"; \
+          exit 1; \
+        fi; \
+        echo "[vllm] Model path = $${MODEL_PATH}"; \
+        echo "[vllm] ROCm version: $$(cat /opt/rocm/.info/version 2>/dev/null || echo unknown)"'
+
+      ExecStart=/bin/bash -c '\
+        exec python3 -m vllm.entrypoints.openai.api_server \
+          --host 0.0.0.0 \
+          --port ${VLLM_PORT} \
+          --model ${MODEL_PATH} \
+          --enforce-eager \
+          --max-num-seqs 64 \
+          --max-model-len 32768 \
+          --gpu-memory-utilization 0.92 \
+          --disable-log-requests'
+
+      Restart=always
+      RestartSec=10
+      StandardOutput=journal
+      StandardError=journal
+      OOMScoreAdjust=-500
+      TimeoutStartSec=600
+
+      [Install]
+      WantedBy=multi-user.target
+
+runcmd:
+  # ── Download model weights ───────────────────────────────────────────────
+  - mkdir -p /mnt/models
+  - |
+    . /etc/vllm.env
+    if [ -d "${MODEL_PATH}" ] && [ -n "$(ls -A ${MODEL_PATH} 2>/dev/null)" ]; then
+      echo "[cloud-init] Model already cached at ${MODEL_PATH}, skipping download."
+    else
+      echo "[cloud-init] Downloading ${MODEL_ID} — this may take 10-30 min ..."
+      if [ -n "${HF_TOKEN}" ]; then
+        python3 -c "
+import os
+os.environ['HF_TOKEN'] = '${HF_TOKEN}'
+from huggingface_hub import snapshot_download
+snapshot_download('${MODEL_ID}', local_dir='${MODEL_PATH}', local_dir_use_symlinks=False)
+"
+      else
+        python3 -c "
+from huggingface_hub import snapshot_download
+snapshot_download('${MODEL_ID}', local_dir='${MODEL_PATH}', local_dir_use_symlinks=False)
+"
+      fi
+      echo "[cloud-init] Model download complete."
+    fi
+
+  # ── Enable & start vLLM ─────────────────────────────────────────────────
+  - systemctl daemon-reload
+  - systemctl enable vllm.service
+  - systemctl start vllm.service
+
+final_message: |
+  GreatAegis vLLM server is starting.
+  Check status:  systemctl status vllm
+  Follow logs:   journalctl -u vllm -f
+  Health check:  curl http://localhost:8000/health

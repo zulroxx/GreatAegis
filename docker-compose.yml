@@ -23,6 +23,8 @@ services:
     environment:
       - FIREWORKS_API_KEY=${FIREWORKS_API_KEY}
       - LOCAL_AMD_URL=${LOCAL_AMD_URL:-http://localhost:8080}
+      - GPU_PROMETHEUS_URL=${GPU_PROMETHEUS_URL:-}
+      - ROCM_SMI_URL=${ROCM_SMI_URL:-}
     env_file:
       - ./backend/.env
     volumes:
