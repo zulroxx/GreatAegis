@@ -10,19 +10,19 @@ Covers:
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 # ── Prompt Inspection ────────────────────────────────────────────────────────
 
 class InspectRequest(BaseModel):
-    prompt_payload: str
-    routing_profile: str = "auto"  # "auto" | "compliance" | "deep-inference"
+    prompt_payload: str = Field(..., max_length=100_000)
+    routing_profile: str = "auto"
     client_encryption_flag: bool = False
     quantum_encryption_enabled: bool = True
     zero_trust_enabled: bool = True
     pod_isolation_enabled: bool = True
-    encrypted_prompt: str | None = None  # base64 JSON of ML-KEM encapsulated prompt
+    encrypted_prompt: str | None = None
 
 
 class InspectResponse(BaseModel):
@@ -71,11 +71,11 @@ class LogEntry(BaseModel):
 
 class DocumentIngestRequest(BaseModel):
     """Upload a file's text content for encrypted local vector storage."""
-    file_name: str
-    classification: str  # e.g. "Public" | "Confidential" | "Highly Confidential"
-    content: str         # raw text extracted from the uploaded file
-    chunk_size: int = 512
-    chunk_overlap: int = 64
+    file_name: str = Field(..., max_length=255, pattern=r'^[\w\-\. ]+$')
+    classification: str = Field(..., pattern=r'^(Public|Confidential|Highly Confidential)$')
+    content: str = Field(..., max_length=1_000_000)
+    chunk_size: int = Field(default=512, ge=128, le=4096)
+    chunk_overlap: int = Field(default=64, ge=0, le=512)
 
 
 class DocumentIngestResponse(BaseModel):
@@ -87,8 +87,8 @@ class DocumentIngestResponse(BaseModel):
 
 
 class DocumentQueryRequest(BaseModel):
-    query: str
-    top_k: int = 5
+    query: str = Field(..., max_length=10_000)
+    top_k: int = Field(default=5, ge=1, le=50)
     filter_classification: str | None = None
 
 
@@ -141,34 +141,34 @@ class HealthResponse(BaseModel):
 # ── Fireworks AI Chat (direct, user-picks-model) ─────────────────────────────
 
 class ChatRequest(BaseModel):
-    prompt: str
+    prompt: str = Field(..., max_length=100_000)
     model: str = "accounts/fireworks/models/glm-5p2"
-    temperature: float = 0.7
-    max_tokens: int = 2048
+    temperature: float = Field(default=0.7, ge=0.0, le=2.0)
+    max_tokens: int = Field(default=2048, ge=1, le=8192)
     system_prompt: str | None = None
     routing_profile: str = "auto"
     client_encryption_flag: bool = False
     quantum_encryption_enabled: bool = True
     zero_trust_enabled: bool = True
     pod_isolation_enabled: bool = True
-    encrypted_prompt: str | None = None  # base64 JSON of ML-KEM encapsulated prompt
+    encrypted_prompt: str | None = None
 
 
 # ── Gateway Chat (autonomous hybrid router decides model) ───────────────────
 
 class GatewayChatRequest(BaseModel):
     """Chat request that goes through the hybrid router."""
-    prompt: str
-    temperature: float = 0.7
-    max_tokens: int = 2048
-    model: str = "accounts/fireworks/models/glm-5p2"
+    prompt: str = Field(..., max_length=100_000)
+    temperature: float = Field(default=0.7, ge=0.0, le=2.0)
+    max_tokens: int = Field(default=2048, ge=1, le=8192)
+    model: str | None = None
     system_prompt: str | None = None
     routing_profile: str = "auto"
     client_encryption_flag: bool = False
     quantum_encryption_enabled: bool = True
     zero_trust_enabled: bool = True
     pod_isolation_enabled: bool = True
-    encrypted_prompt: str | None = None  # base64 JSON of ML-KEM encapsulated prompt
+    encrypted_prompt: str | None = None
 
 
 class ChatResponse(BaseModel):
@@ -235,7 +235,7 @@ class SystemMetricsResponse(BaseModel):
 # ── API Key Management ────────────────────────────────────────────────────────
 
 class ApiKeyRequest(BaseModel):
-    api_key: str
+    api_key: str = Field(..., max_length=500)
 
 
 class SettingsPasswordRequest(BaseModel):

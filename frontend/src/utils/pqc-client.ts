@@ -12,8 +12,7 @@
 
 import { ml_kem768 } from "@noble/post-quantum/ml-kem.js";
 import { ml_dsa65 } from "@noble/post-quantum/ml-dsa.js";
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL;
+import { apiFetch } from "./api";
 
 // ── Cached server public keys ───────────────────────────────────────────────
 
@@ -36,7 +35,7 @@ export async function ensureServerPublicKeys(): Promise<void> {
   if (_keyFetchPromise) return _keyFetchPromise;
 
   _keyFetchPromise = (async () => {
-    const res = await fetch(`${API_BASE}/api/v1/gateway/pqc-public-key`);
+    const res = await apiFetch(`/api/v1/gateway/pqc-public-key`);
     if (!res.ok) throw new Error(`PQC key fetch failed: HTTP ${res.status}`);
     const data: PqcPublicKeyResponse = await res.json();
     _mlkemPublicKey = base64ToBytes(data.mlkem_public_key);

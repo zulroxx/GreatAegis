@@ -24,6 +24,7 @@ import {
   EyeOff,
 } from "lucide-react";
 import { useTheme } from "../contexts/ThemeContext";
+import { apiFetch } from "../utils/api";
 import type { SystemMetricsResponse } from "../types/api";
 
 const POLLING_OPTIONS = [
@@ -32,8 +33,6 @@ const POLLING_OPTIONS = [
   { label: "10 seconds", value: 10000 },
   { label: "30 seconds", value: 30000 },
 ];
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL;
 
 interface ServingPath {
   label: string;
@@ -169,7 +168,7 @@ export default function SettingsPage() {
 
   const checkPasswordRequired = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/v1/gateway/verify-settings-password`, {
+      const res = await apiFetch(`/api/v1/gateway/verify-settings-password`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ password: "" }),
@@ -194,7 +193,7 @@ export default function SettingsPage() {
     setAuthLoading(true);
     setAuthError("");
     try {
-      const res = await fetch(`${API_BASE}/api/v1/gateway/verify-settings-password`, {
+      const res = await apiFetch(`/api/v1/gateway/verify-settings-password`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ password }),
@@ -202,6 +201,7 @@ export default function SettingsPage() {
       const data = await res.json();
       if (data.granted) {
         setAuthenticated(true);
+        setPassword("");
       } else {
         setAuthError("Incorrect password");
       }
@@ -214,7 +214,7 @@ export default function SettingsPage() {
 
   const initKeyStatus = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/v1/gateway/key-status`);
+      const res = await apiFetch(`/api/v1/gateway/key-status`);
       if (res.ok) {
         const data = await res.json();
         setKeyConnected(data.configured);
@@ -223,7 +223,7 @@ export default function SettingsPage() {
         if (!data.configured) {
           const legacy = localStorage.getItem("GREATAEGIS_FIREWORKS_API_KEY");
           if (legacy) {
-            const saveRes = await fetch(`${API_BASE}/api/v1/gateway/save-key`, {
+            const saveRes = await apiFetch(`/api/v1/gateway/save-key`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ api_key: legacy }),
@@ -260,15 +260,17 @@ export default function SettingsPage() {
     setTesting(true);
     setTestResult(null);
     try {
-      const res = await fetch(`${API_BASE}/api/v1/gateway/test-key`, {
+      const res = await apiFetch(`/api/v1/gateway/test-key`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ api_key: fireworksKey }),
       });
       const data = await res.json();
       setTestResult(data);
+      if (data.valid) setFireworksKey("");
     } catch {
       setTestResult({ valid: false, detail: "Cannot reach backend" });
+      setFireworksKey("");
     } finally {
       setTesting(false);
     }
@@ -277,7 +279,7 @@ export default function SettingsPage() {
   const handleSaveKey = useCallback(async () => {
     if (!fireworksKey.trim()) return;
     try {
-      const res = await fetch(`${API_BASE}/api/v1/gateway/save-key`, {
+      const res = await apiFetch(`/api/v1/gateway/save-key`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ api_key: fireworksKey }),
@@ -296,7 +298,7 @@ export default function SettingsPage() {
 
   const handleRemoveKey = useCallback(async () => {
     try {
-      await fetch(`${API_BASE}/api/v1/gateway/key`, { method: "DELETE" });
+      await apiFetch(`/api/v1/gateway/key`, { method: "DELETE" });
     } catch {
       // ignore
     }
@@ -310,7 +312,7 @@ export default function SettingsPage() {
     setSysLoading(true);
     setSysError(null);
     try {
-      const res = await fetch(`${API_BASE}/api/v1/gateway/system`);
+      const res = await apiFetch(`/api/v1/gateway/system`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json: SystemMetricsResponse = await res.json();
       setSysMetrics(json);

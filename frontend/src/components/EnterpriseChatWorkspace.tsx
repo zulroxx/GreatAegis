@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
+import rehypeSanitize from "rehype-sanitize";
 import {
   Send,
   Paperclip,
@@ -15,8 +16,7 @@ import type { ChatRoutingInfo, ChatMessage } from "../types/api";
 import { useChatHistory } from "../contexts/ChatHistoryContext";
 import { extractTextFromFile } from "../utils/fileTextExtractor";
 import { encapsulatePrompt } from "../utils/pqc-client";
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL;
+import { apiFetch } from "../utils/api";
 
 const SUGGESTIONS = [
   "Explain quantum-resistant cryptography in simple terms",
@@ -38,7 +38,6 @@ function getQuantumRule(label: string, defaultVal: boolean = true): boolean {
 
 async function streamGatewayChat(
   prompt: string,
-  model: string,
   onRouting: (info: ChatRoutingInfo) => void,
   onToken: (token: string) => void,
   onDone: () => void,
@@ -63,14 +62,13 @@ async function streamGatewayChat(
       }
     }
 
-    const res = await fetch(`${API_BASE}/api/v1/gateway/chat/stream`, {
+    const res = await apiFetch(`/api/v1/gateway/chat/stream`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
         prompt,
-        model,
         temperature: 0.7,
         max_tokens: 2048,
         system_prompt: systemPrompt,
@@ -198,7 +196,7 @@ export default function EnterpriseChatWorkspace() {
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/v1/gateway/key-status`)
+    apiFetch(`/api/v1/gateway/key-status`)
       .then((res) => res.json())
       .then((data) => setKeyConnected(data.configured))
       .catch(() => {});
@@ -241,7 +239,7 @@ export default function EnterpriseChatWorkspace() {
 
     // Ingest the file into Qdrant so it's available for future RAG queries
     if (currentFile) {
-      fetch(`${API_BASE}/api/v1/gateway/vector/ingest`, {
+      apiFetch(`/api/v1/gateway/vector/ingest`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -304,19 +302,22 @@ export default function EnterpriseChatWorkspace() {
     const quantumEncryption = getQuantumRule("Enforce Client-Side ML-KEM/Kyber Key Wrapping");
     const zeroTrust = getQuantumRule("Zero-Trust Data-in-Transit Payload Encapsulation");
     const podIsolation = getQuantumRule("Strict Safe-Compute Pod Isolation");
-    const model = localStorage.getItem("GREATAEGIS_FIREWORKS_MODEL") || "accounts/fireworks/models/glm-5p2";
 
     let fullContent = "";
+    const latest = { current: newMessages };
 
     await streamGatewayChat(
       fullPrompt,
-      model,
       (routing) => {
-        updateMessages(convId, updateMessageById(newMessages, assistantId, (m) => ({ ...m, routing })));
+        const updated = updateMessageById(latest.current, assistantId, (m) => ({ ...m, routing }));
+        latest.current = updated;
+        updateMessages(convId, updated);
       },
       (token) => {
         fullContent += token;
-        updateMessages(convId, updateMessageById(newMessages, assistantId, (m) => ({ ...m, content: fullContent })));
+        const updated = updateMessageById(latest.current, assistantId, (m) => ({ ...m, content: fullContent }));
+        latest.current = updated;
+        updateMessages(convId, updated);
       },
       () => {
         setStreaming(false);
@@ -324,7 +325,9 @@ export default function EnterpriseChatWorkspace() {
       (err) => {
         setError(err);
         setStreaming(false);
-        updateMessages(convId, updateMessageById(newMessages, assistantId, (m) => ({ ...m, content: `⚠️ Error: ${err}` })));
+        const updated = updateMessageById(latest.current, assistantId, (m) => ({ ...m, content: `⚠️ Error: ${err}` }));
+        latest.current = updated;
+        updateMessages(convId, updated);
       },
       quantumEncryption,
       zeroTrust,
@@ -357,6 +360,10 @@ export default function EnterpriseChatWorkspace() {
     const file = e.target.files?.[0];
     if (!file) return;
     e.target.value = "";
+    if (file.size > 10 * 1024 * 1024) {
+      setError("File too large — maximum 10 MB.");
+      return;
+    }
     setFileProcessing(true);
     setError(null);
     try {
@@ -675,7 +682,7 @@ export default function EnterpriseChatWorkspace() {
                   {msg.content ? (
                     msg.role === "assistant" ? (
                       <div className="prose prose-sm max-w-none" style={{ color: "var(--color-text-primary)" }}>
-                        <ReactMarkdown components={markdownComponents}>{msg.content}</ReactMarkdown>
+                        <ReactMarkdown rehypePlugins={[rehypeSanitize]} components={markdownComponents}>{msg.content}</ReactMarkdown>
                       </div>
                     ) : (
                       msg.content

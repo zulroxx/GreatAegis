@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import type { MetricsResponse } from "../types/api";
+import { apiFetch } from "../utils/api";
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL;
 const POLL_INTERVAL = 5000; // 5 seconds
 
 interface UseMetricsPollingResult {
@@ -21,7 +21,7 @@ export default function useMetricsPolling(): UseMetricsPollingResult {
 
     const fetchMetrics = async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/v1/gateway/metrics`);
+        const res = await apiFetch(`/api/v1/gateway/metrics`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json: MetricsResponse = await res.json();
         if (mounted.current) {

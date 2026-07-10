@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
+import { apiFetch } from "../utils/api";
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL;
 const POLL_INTERVAL = 5_000; // 5 seconds — aligned with other polling hooks
 
 export interface HealthData {
@@ -26,7 +26,7 @@ export default function useHealthPolling(): UseHealthPollingResult {
 
     const fetchHealth = async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/v1/gateway/health`);
+        const res = await apiFetch(`/api/v1/gateway/health`);
         if (!res.ok) {
           if (mounted.current) setReachable(false);
           return;

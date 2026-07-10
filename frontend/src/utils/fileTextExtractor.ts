@@ -11,6 +11,9 @@ import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
+const MAX_FILE_SIZE = 10 * 1024 * 1024;
+const MAX_TEXT_LENGTH = 500_000;
+
 const PDF_EXTENSIONS = [".pdf"];
 const TEXT_EXTENSIONS = [
   ".txt", ".csv", ".json", ".md", ".tsv", ".log", ".xml", ".html", ".htm", ".yaml", ".yml",
@@ -38,6 +41,12 @@ function isTextFile(name: string): boolean {
  *   explaining the limitation.
  */
 export async function extractTextFromFile(file: File): Promise<{ text: string; unsupported?: boolean }> {
+  if (file.size > MAX_FILE_SIZE) {
+    return {
+      text: `[File "${file.name}" exceeds the 10 MB size limit. Please use a smaller file.]`,
+      unsupported: true,
+    };
+  }
   if (isPdf(file.name)) {
     try {
       const arrayBuffer = await file.arrayBuffer();

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import type { GPUTelemetryResponse } from "../types/api";
+import { apiFetch } from "../utils/api";
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL;
 const POLL_INTERVAL = 8_000; // 8 seconds
 
 interface UseTelemetryPollingResult {
@@ -21,7 +21,7 @@ export default function useTelemetryPolling(): UseTelemetryPollingResult {
 
     const fetchTelemetry = async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/v1/gateway/telemetry`);
+        const res = await apiFetch(`/api/v1/gateway/telemetry`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json: GPUTelemetryResponse = await res.json();
         if (mounted.current) {
