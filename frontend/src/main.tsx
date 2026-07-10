@@ -1,5 +1,6 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { Analytics } from "@vercel/analytics/react";
 import "./index.css";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { ChatHistoryProvider } from "./contexts/ChatHistoryContext";
@@ -10,6 +11,7 @@ createRoot(document.getElementById("root")!).render(
     <ThemeProvider>
       <ChatHistoryProvider>
         <App />
+        <Analytics />
       </ChatHistoryProvider>
     </ThemeProvider>
   </StrictMode>,
