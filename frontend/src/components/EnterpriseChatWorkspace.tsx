@@ -25,6 +25,7 @@ const SUGGESTIONS = [
 ];
 
 const STORAGE_PREFIX = "great-aegis-quantum-rule-";
+const MODEL_STORAGE_KEY = "GREATAEGIS_FIREWORKS_MODEL";
 
 function getQuantumRule(label: string, defaultVal: boolean = true): boolean {
   try {
@@ -48,6 +49,7 @@ async function streamGatewayChat(
   signal?: AbortSignal,
   onWarning?: (warning: string) => void,
   systemPrompt?: string,
+  model?: string,
 ) {
   try {
     // ── Client-side PQC: encrypt prompt before transit if ML-KEM is enabled ──
@@ -69,6 +71,7 @@ async function streamGatewayChat(
       },
       body: JSON.stringify({
         prompt,
+        model,
         temperature: 0.7,
         max_tokens: 2048,
         system_prompt: systemPrompt,
@@ -303,6 +306,8 @@ export default function EnterpriseChatWorkspace() {
     const zeroTrust = getQuantumRule("Zero-Trust Data-in-Transit Payload Encapsulation");
     const podIsolation = getQuantumRule("Strict Safe-Compute Pod Isolation");
 
+    const selectedModel = localStorage.getItem(MODEL_STORAGE_KEY) || undefined;
+
     let fullContent = "";
     const latest = { current: newMessages };
 
@@ -339,6 +344,7 @@ export default function EnterpriseChatWorkspace() {
       currentFile
         ? "The user's message contains document text labeled 'Document text:'. It is NOT a file attachment — the actual text has already been extracted and is included directly in the message. Read it and answer the user's question about it."
         : undefined,
+      selectedModel,
     );
   }, [input, streaming, activeConversationId, conversations, createConversation, updateMessages]);
 

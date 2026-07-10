@@ -1590,7 +1590,7 @@ async def gateway_chat_stream(
             async for chunk in stream_chat_completion(
                 api_key=api_key,
                 messages=messages,
-                model=model_name,
+                model=req.model or model_name,
                 temperature=req.temperature,
                 max_tokens=req.max_tokens,
                 encrypt_in_transit=req.quantum_encryption_enabled,
@@ -1613,7 +1613,7 @@ async def gateway_chat_stream(
             async for chunk in stream_chat_completion(
                 api_key=api_key,
                 messages=messages,
-                model=model_name,
+                model=req.model or model_name,
                 temperature=req.temperature,
                 max_tokens=req.max_tokens,
                 encrypt_in_transit=req.quantum_encryption_enabled,
@@ -1698,10 +1698,7 @@ async def gateway_chat_stream(
 
         # ── Estimate usage for all routes ──────────────────────────
         from fireworks_client import track_estimated
-        if verdict.startswith("private_") or verdict == "secure_fallback":
-            effective_model = model_name
-        else:
-            effective_model = req.model or model_name
+        effective_model = req.model or model_name
         track_estimated(
             model=effective_model,
             prompt=req.prompt,
