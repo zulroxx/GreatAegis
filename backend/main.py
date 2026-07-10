@@ -40,6 +40,7 @@ import logging
 import os
 import time
 import hashlib
+import hmac
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone, timedelta
 
@@ -132,9 +133,13 @@ if APP_MODE == "production":
         logger.error("Generate a new seed: python -c \"import secrets; print(secrets.token_hex(32))\"")
         sys.exit(1)
     if SETTINGS_PASSWORD in ("", "root"):
-        logger.warning("SETTINGS_PASSWORD is empty or using the default 'root'. Set a strong password for production.")
+        logger.error("FATAL: SETTINGS_PASSWORD is empty or using the default 'root'. Set a strong password for production.")
+        sys.exit(1)
     if not VLLM_ENDPOINTS.get("mixtral-8x7b") and not VLLM_ENDPOINTS.get("gemma-7b"):
         logger.info("No VLLM endpoints configured — gateway will operate with Fireworks AI fallback only.")
+        if not STORED_API_KEY:
+            logger.error("FATAL: No VLLM endpoints configured and FIREWORKS_API_KEY is not set. Gateway has no available backend.")
+            sys.exit(1)
 
 
 # ── Server-side API key storage (in-memory only, never persisted) ────────────
@@ -225,7 +230,7 @@ async def _security_middleware(request: Request, call_next):
     if GATEWAY_API_TOKEN and not is_local and request.method != "OPTIONS":
         if request.url.path.startswith("/api/v1/"):
             auth_header = request.headers.get("Authorization", "")
-            if not (auth_header.startswith("Bearer ") and auth_header[7:] == GATEWAY_API_TOKEN):
+            if not (auth_header.startswith("Bearer ") and hmac.compare_digest(auth_header[7:], GATEWAY_API_TOKEN)):
                 rejection = Response(
                     status_code=401,
                     content='{"detail":"Unauthorized — invalid or missing gateway token"}',
