@@ -59,6 +59,10 @@ RUN useradd --create-home --shell /bin/bash greataegis
 USER greataegis
 WORKDIR /home/greataegis
 
+# ── ROCm metrics server ──────────────────────────────────────────────────────
+COPY rocm_metrics_server.py /usr/local/bin/rocm_metrics_server.py
+RUN chmod +x /usr/local/bin/rocm_metrics_server.py
+
 # ── Health check ────────────────────────────────────────────────────────────
 # The vLLM server exposes /health on port 8000.
 HEALTHCHECK --interval=15s --timeout=5s --retries=4 \
