@@ -83,8 +83,7 @@ def get_model_usage() -> list[dict]:
         "accounts/fireworks/models/deepseek-v4-pro": "DeepSeek V4 Pro",
         "accounts/fireworks/models/qwen3p7-plus": "Qwen 3.7 Plus",
         "accounts/fireworks/models/gpt-oss-120b": "GPT-OSS-120B",
-        "gemma-7b": "Gemma-7B (AMD Private Pod)",
-        "mixtral-8x7b": "Mixtral-8x7B (AMD Private Pod)",
+        "qwen": "Qwen3-0.6B (AMD Private Pod)",
         "Fireworks AI (Encrypted Tunnel Fallback)": "Fireworks AI (Fallback)",
     }
     results: list[dict] = []

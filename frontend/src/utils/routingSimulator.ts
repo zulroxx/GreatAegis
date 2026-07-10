@@ -46,15 +46,13 @@ function keywordHits(text: string, keywords: string[]): number {
 
 export type Verdict =
   | "public_fireworks"
-  | "private_gemma"
-  | "private_mixtral"
+  | "private_qwen"
   | "secure_fallback";
 
 export type ModelName =
-  | "mixtral-8x7b"
-  | "gemma-7b"
+  | "qwen"
   | "Fireworks AI (Encrypted Tunnel Fallback)"
-  | "accounts/fireworks/models/gemma-4-26b-a4b-it";
+  | "accounts/fireworks/models/glm-5p2";
 
 export type WorkloadType = "compliance" | "deep-inference" | "general" | null;
 
@@ -117,7 +115,7 @@ export function computeRiskScore(prompt: string): { score: number; matchedKeywor
 // ── Workload classification ────────────────────────────────────────────────
 
 /**
- * Classify the prompt workload type to decide between Gemma and Mixtral.
+ * Classify the prompt workload type to decide between compliance and deep-inference profiles.
  * Exact replica of hybrid_router._classify_workload().
  */
 export function classifyWorkload(prompt: string): WorkloadType {
@@ -189,9 +187,9 @@ export function simulateRoute(
       effectiveEncryption,
       scoreBelowThreshold,
       verdict: "public_fireworks",
-      modelName: "accounts/fireworks/models/gemma-4-26b-a4b-it",
+      modelName: "accounts/fireworks/models/glm-5p2",
       reason:
-        "Low-risk content; routed to public Fireworks endpoint via Gemma 4 26B for cost efficiency.",
+        "Low-risk content; routed to public Fireworks endpoint via Qwen3-0.6B for cost efficiency.",
       fallbackEngaged: false,
       workloadType: classifyWorkload(prompt),
       routingProfile,
@@ -214,18 +212,18 @@ export function simulateRoute(
   let reason: string;
 
   if (workload === "compliance") {
-    verdict = "private_gemma";
-    modelName = "gemma-7b";
+    verdict = "private_qwen";
+    modelName = "qwen";
     reason =
       "Lightweight compliance / policy verification task; " +
-      "routed to AMD-hosted Gemma-7B via vLLM for optimal cost-performance.";
+      "routed to AMD Instinct Pod running Qwen3-0.6B via vLLM (compliance profile).";
   } else {
-    verdict = "private_mixtral";
-    modelName = "mixtral-8x7b";
+    verdict = "private_qwen";
+    modelName = "qwen";
     reason =
       "Sensitive or complex inference task; " +
-      "routed to AMD Instinct MI300X Pod running Mixtral-8x7B via vLLM " +
-      "with client-side ML-KEM encryption.";
+      "routed to AMD Instinct MI300X Pod running Qwen3-0.6B via vLLM " +
+      "with client-side ML-KEM encryption (deep-inference profile).";
   }
 
   // ── Step 3: hardware health check (production only) ────────────

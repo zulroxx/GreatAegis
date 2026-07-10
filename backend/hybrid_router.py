@@ -2,14 +2,11 @@
 GreatAegis Hybrid Router — intelligent multi-model routing engine with
 hardware-aware fault tolerance.
 
-Three-tier routing architecture:
-  1. PUBLIC          → Fireworks AI API via Gemma 4 26B (safe, low-cost public endpoint)
-  2. PRIVATE-GEMMA   → AMD-hosted Gemma via vLLM (lightweight compliance,
-                         policy verification, intermediate reasoning)
-  3. PRIVATE-MIXTRAL → AMD Instinct Pod via vLLM (heavy inference, high-
-                         sensitivity data, deep confidential reasoning)
+Two-tier routing architecture:
+  1. PUBLIC     → Fireworks AI API via GLM 5.2 (safe, low-cost public endpoint)
+  2. PRIVATE    → AMD Instinct Pod via vLLM (Qwen/Qwen3-0.6B, private inference)
 
-When APP_MODE=production and a vLLM endpoint is unreachable, the router
+When APP_MODE=production and the vLLM endpoint is unreachable, the router
 automatically engages SECURE_FALLBACK — emergency zero-trust routing via
 client-side encrypted PQC tunnel to Fireworks AI — instead of throwing a
 500 Internal Server Error.
@@ -28,13 +25,11 @@ logger = logging.getLogger("great_aegis.hybrid_router")
 
 Verdict = Literal[
     "public_fireworks",
-    "private_gemma",
-    "private_mixtral",
+    "private_qwen",
     "secure_fallback",
 ]
 ModelName = Literal[
-    "gemma-7b",
-    "mixtral-8x7b",
+    "qwen",
     "Fireworks AI (Encrypted Tunnel Fallback)",
     "accounts/fireworks/models/glm-5p2",
 ]
@@ -52,7 +47,7 @@ _SENSITIVE_KEYWORDS = [
 ]
 
 # Keywords that indicate the prompt is a compliance / policy / lightweight
-# reasoning task → route to Gemma (cheaper, equally capable for this tier).
+# reasoning task → route to private Qwen (compliance profile).
 _COMPLIANCE_KEYWORDS = [
     "compliance", "policy", "audit", "regulation", "gdpr",
     "soc2", "iso27001", "hipaa", "pci", "governance",
@@ -62,7 +57,7 @@ _COMPLIANCE_KEYWORDS = [
     "lightweight", "simple query", "faq",
 ]
 
-# Prompts that clearly need deep inference → Mixtral
+# Prompts that clearly need deep inference → Qwen (deep-inference profile)
 _DEEP_INFERENCE_KEYWORDS = [
     "generate", "write", "draft", "compose", "create",
     "analyse", "analyze", "deep dive", "complex", "detailed",
@@ -109,7 +104,7 @@ def _compute_risk_score(prompt: str) -> int:
 
 def _classify_workload(prompt: str) -> Literal["compliance", "deep-inference", "general"]:
     """
-    Classify the prompt workload type to decide between Gemma and Mixtral.
+    Classify the prompt workload type to decide between compliance and deep-inference profiles.
     """
     lowered = prompt.lower()
     compliance_hits = _keyword_hits(lowered, _COMPLIANCE_KEYWORDS)
@@ -262,34 +257,18 @@ def route(
             "public_fireworks",
             score,
             "accounts/fireworks/models/glm-5p2",
-            "Low-risk content; routed to public Fireworks endpoint via Gemma 4 26B for cost efficiency.",
+            "Low-risk content; routed to public Fireworks endpoint via GLM 5.2 for cost efficiency.",
             False,
         )
 
-    # ── Step 2: which private model? ───────────────────────────────────
-    workload = _classify_workload(prompt_payload)
-
-    # Respect explicit routing profile overrides
-    if routing_profile == "compliance":
-        workload = "compliance"
-    elif routing_profile == "deep-inference":
-        workload = "deep-inference"
-
-    if workload == "compliance":
-        verdict: Verdict = "private_gemma"
-        target_model: ModelName = "gemma-7b"
-        reason = (
-            "Lightweight compliance / policy verification task; "
-            "routed to AMD-hosted Gemma-7B via vLLM for optimal cost-performance."
-        )
-    else:
-        verdict = "private_mixtral"
-        target_model = "mixtral-8x7b"
-        reason = (
-            "Sensitive or complex inference task; "
-            "routed to AMD Instinct MI300X Pod running Mixtral-8x7B via vLLM "
-            "with client-side ML-KEM encryption."
-        )
+    # ── Step 2: route to private Qwen ─────────────────────────────────
+    verdict: Verdict = "private_qwen"
+    target_model: ModelName = "qwen"
+    reason = (
+        "Sensitive or complex inference task; "
+        "routed to AMD Instinct MI300X Pod running Qwen3-0.6B via vLLM "
+        "with client-side ML-KEM encryption."
+    )
 
     # ── Step 3: hardware health check (production only) ────────────────
     if app_mode == "production" and vllm_endpoints:

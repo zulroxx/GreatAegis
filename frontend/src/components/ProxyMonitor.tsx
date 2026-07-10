@@ -307,7 +307,7 @@ export default function ProxyMonitor({
           style={{ filter: isPrivate ? "drop-shadow(0 0 8px #00CC6666)" : "none", transition: "fill 300ms, stroke 300ms, filter 300ms" }}
         />
         <text x={NODES.private.cx} y={NODES.private.cy - 1} fill={isPrivate ? "#00CC66" : "var(--color-text-secondary)"} fontSize={11} fontFamily="Inter, sans-serif" textAnchor="middle" dominantBaseline="central" fontWeight={500}>
-          Local Mixtral
+          GLM 5.2
         </text>
         <text x={NODES.private.cx} y={NODES.private.cy + 12} fill={isPrivate ? "#00CC66CC" : "var(--color-text-muted)"} fontSize={9} fontFamily="Inter, sans-serif" textAnchor="middle" dominantBaseline="central">
           AMD Instinct™ Pod

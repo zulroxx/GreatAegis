@@ -27,8 +27,8 @@ const RULES = [
 
 const ROUTING_PROFILES: { value: RoutingProfile; label: string }[] = [
   { value: "auto", label: "Auto (classify from prompt)" },
-  { value: "compliance", label: "Compliance (force Gemma)" },
-  { value: "deep-inference", label: "Deep Inference (force Mixtral)" },
+  { value: "compliance", label: "Compliance (force GLM compliance profile)" },
+  { value: "deep-inference", label: "Deep Inference (force GLM deep-inference profile)" },
 ];
 
 const EXAMPLE_PROMPT = "What is the Q4 financial forecast for the merger acquisition?";
@@ -51,10 +51,8 @@ function getVerdictColor(verdict: string): { bg: string; border: string; text: s
   switch (verdict) {
     case "public_fireworks":
       return { bg: "var(--color-success-dim)", border: "color-mix(in srgb, var(--color-success) 30%, transparent)", text: "var(--color-success)" };
-    case "private_gemma":
+    case "private_qwen":
       return { bg: "rgba(0, 230, 118, 0.08)", border: "color-mix(in srgb, var(--color-accent) 30%, transparent)", text: "var(--color-accent)" };
-    case "private_mixtral":
-      return { bg: "var(--color-accent-dim)", border: "color-mix(in srgb, var(--color-accent) 30%, transparent)", text: "var(--color-accent)" };
     case "secure_fallback":
       return { bg: "rgba(243, 128, 32, 0.1)", border: "rgba(243, 128, 32, 0.3)", text: "var(--color-warning)" };
     default:

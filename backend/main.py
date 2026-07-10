@@ -109,13 +109,11 @@ SETTINGS_PASSWORD: str = os.environ.get("SETTINGS_PASSWORD", "")
 # ── vLLM endpoint map (used in production mode) ─────────────────────────────
 
 VLLM_ENDPOINTS: dict[str, str] = {
-    "mixtral-8x7b": os.environ.get("VLLM_MIXTRAL_ENDPOINT", ""),
-    "gemma-7b": os.environ.get("VLLM_GEMMA_ENDPOINT", ""),
+    "qwen": os.environ.get("VLLM_ENDPOINT", ""),
 }
 
 VLLM_MODEL_NAMES: dict[str, str] = {
-    "mixtral-8x7b": os.environ.get("VLLM_MIXTRAL_MODEL_NAME", "mixtral-8x7b"),
-    "gemma-7b": os.environ.get("VLLM_GEMMA_MODEL_NAME", "gemma-7b"),
+    "qwen": os.environ.get("VLLM_MODEL_NAME", "Qwen/Qwen3-0.6B"),
 }
 
 # ── Production safety checks ──────────────────────────────────────────────────
@@ -135,7 +133,7 @@ if APP_MODE == "production":
     if SETTINGS_PASSWORD in ("", "root"):
         logger.error("FATAL: SETTINGS_PASSWORD is empty or using the default 'root'. Set a strong password for production.")
         sys.exit(1)
-    if not VLLM_ENDPOINTS.get("mixtral-8x7b") and not VLLM_ENDPOINTS.get("gemma-7b"):
+    if not VLLM_ENDPOINTS.get("qwen"):
         logger.info("No VLLM endpoints configured — gateway will operate with Fireworks AI fallback only.")
         if not STORED_API_KEY:
             logger.error("FATAL: No VLLM endpoints configured and FIREWORKS_API_KEY is not set. Gateway has no available backend.")
@@ -662,11 +660,9 @@ async def inspect_prompt(request: Request, req: InspectRequest):
             pqc_sig = "emergency-pqc-tunnel-recommended"
             pqc_valid = False
 
-    elif verdict in ("private_gemma", "private_mixtral"):
+    elif verdict == "private_qwen":
         target_node = (
-            "AMD-Instinct-MI300X-Private-Pod-02"
-            if verdict == "private_gemma"
-            else "AMD-Instinct-MI300X-Private-Pod-01"
+            "AMD-Instinct-MI300X-Private-Pod (Qwen3-0.6B)"
         )
         encryption_status = "client-side ML-KEM wrapping"
 
@@ -961,14 +957,14 @@ def _resolve_rocm_smi_url() -> str:
 
     Priority:
       1. ROCM_SMI_URL env var (explicit)
-      2. Derived from VLLM_MIXTRAL_ENDPOINT — same host, port 8001, path /gpu
+       2. Derived from VLLM_ENDPOINT — same host, port 8001, path /gpu
       3. Empty string (no remote endpoint)
     """
     rocm_url = os.environ.get("ROCM_SMI_URL", "").strip()
     if rocm_url:
         return rocm_url
 
-    vllm_ep = os.environ.get("VLLM_MIXTRAL_ENDPOINT", "").strip()
+    vllm_ep = os.environ.get("VLLM_ENDPOINT", "").strip()
     if vllm_ep:
         from urllib.parse import urlparse
         parsed = urlparse(vllm_ep)
@@ -1104,14 +1100,14 @@ def _resolve_gpu_prometheus_url() -> str:
 
     Priority:
       1. GPU_PROMETHEUS_URL env var (explicit)
-      2. Derived from VLLM_MIXTRAL_ENDPOINT — same host, port 5000, path /metrics
+       2. Derived from VLLM_ENDPOINT — same host, port 5000, path /metrics
       3. Empty string (no endpoint)
     """
     prom_url = os.environ.get("GPU_PROMETHEUS_URL", "").strip()
     if prom_url:
         return prom_url
 
-    vllm_ep = os.environ.get("VLLM_MIXTRAL_ENDPOINT", "").strip()
+    vllm_ep = os.environ.get("VLLM_ENDPOINT", "").strip()
     if vllm_ep:
         from urllib.parse import urlparse
         parsed = urlparse(vllm_ep)
@@ -1129,7 +1125,7 @@ def _read_live_rocm_smi() -> list[GPUDeviceInfo]:
       1. Local rocm-smi --showmetrics --json
       2. Remote rocm-smi HTTP endpoint (ROCM_SMI_URL env var)
       3. Prometheus metrics endpoint (GPU_PROMETHEUS_URL env var or
-         derived from VLLM_MIXTRAL_ENDPOINT, port 5000/metrics)
+         derived from VLLM_ENDPOINT, port 5000/metrics)
       4. Stub fallback (zero-value device)
     """
     import json
@@ -1399,8 +1395,7 @@ async def fireworks_chat_stream(
 def _simulate_private_response(model_name: str, prompt: str, temperature: float, max_tokens: int):
     """
     Generate a simulated streaming response for private AMD pod routes.
-    Used in APP_MODE=simulated when the router decides private_gemma or
-    private_mixtral.
+    Used in APP_MODE=simulated when the router decides private_qwen.
 
     Produces a context-aware response based on the actual prompt rather
     than a generic compliance assessment.  The output is intentionally
@@ -1409,40 +1404,26 @@ def _simulate_private_response(model_name: str, prompt: str, temperature: float,
     import time
     import re
 
-    model_label = "Gemma-7B (AMD Instinct)" if "gemma" in model_name else "Mixtral-8x7B (AMD Instinct)"
+    model_label = "Qwen3-0.6B (AMD Instinct)"
     header = (
         f"[Processed on {model_label} — private compute pod (simulated)]\n"
         "Your prompt was classified as sensitive and routed to the private AMD pod.\n"
         "---\n\n"
     )
 
-    if "gemma" in model_name:
-        body = (
-            f"**Response (Gemma-7B — simulated):**\n\n"
-            f"Your prompt: *{prompt[:200]}{'...' if len(prompt) > 200 else ''}*\n\n"
-            f"I have processed this request within the simulated AMD Instinct MI300X pod. "
-            f"In production this would be served by the lightweight Gemma-7B model running "
-            f"via vLLM on a real AMD GPU.\n\n"
-            f"The content was analysed for sensitivity and regulatory alignment. "
-            f"All processing occurred within the air-gapped compute boundary — "
-            f"no data left the secure pod.\n\n"
-            f"**Note:** This is a simulated response. Connect a real vLLM endpoint "
-            f"(APP_MODE=production) for live LLM inference on AMD hardware."
-        )
-    else:
-        body = (
-            f"**Deep Inference Response (Mixtral-8x7B — simulated):**\n\n"
-            f"Your prompt: *{prompt[:200]}{'...' if len(prompt) > 200 else ''}*\n\n"
-            f"This request has been processed through the simulated Mixtral-8x7B "
-            f"parameter set on the AMD Instinct MI300X accelerator.\n\n"
-            f"In production mode this workload would leverage the full Mixtral "
-            f"model for deep inference tasks such as code generation, complex "
-            f"reasoning, and detailed analytical work.\n\n"
-            f"All intermediate states remained encrypted and air-gapped within "
-            f"the private compute pod — no data was exposed to public endpoints.\n\n"
-            f"**Note:** This is a simulated response. Connect a real vLLM endpoint "
-            f"(APP_MODE=production) for live LLM inference on AMD hardware."
-        )
+    body = (
+        f"**Response (Qwen3-0.6B — simulated):**\n\n"
+        f"Your prompt: *{prompt[:200]}{'...' if len(prompt) > 200 else ''}*\n\n"
+        f"This request has been processed through the simulated Qwen3-0.6B "
+        f"model on the AMD Instinct MI300X accelerator.\n\n"
+        f"In production mode this workload would leverage the full Qwen3-0.6B "
+        f"model for inference tasks such as compliance checking, code generation, "
+        f"complex reasoning, and detailed analytical work.\n\n"
+        f"All intermediate states remained encrypted and air-gapped within "
+        f"the private compute pod — no data was exposed to public endpoints.\n\n"
+        f"**Note:** This is a simulated response. Connect a real vLLM endpoint "
+        f"(APP_MODE=production) for live LLM inference on AMD hardware."
+    )
 
     full_text = header + body
     tokens: list[str] = re.split(r"(\s+)", full_text)
@@ -1470,9 +1451,8 @@ async def gateway_chat_stream(
     No user-driven model selection — the gateway decides.
 
     Routing outcomes:
-      public_fireworks  → Fireworks AI (Gemma 4 26B) — general prompts
-      private_gemma     → AMD Instinct pod (Gemma-7B) — compliance tasks
-      private_mixtral   → AMD Instinct pod (Mixtral-8x7B) — deep inference
+      public_fireworks  → Fireworks AI (GLM 5.2) — general prompts
+      private_qwen      → AMD Instinct pod (Qwen3-0.6B) — private inference
       secure_fallback   → Fireworks AI via encrypted PQC tunnel — disaster recovery
 
     SSE event types:
@@ -1538,12 +1518,9 @@ async def gateway_chat_stream(
     if verdict == "public_fireworks":
         encryption_status = "plaintext (public route)"
         target_node = "Fireworks AI (Public)"
-    elif verdict == "private_gemma":
+    elif verdict == "private_qwen":
         encryption_status = "client-side ML-KEM wrapping"
-        target_node = "AMD-Instinct-MI300X-Private-Pod-02 (Gemma-7B)"
-    elif verdict == "private_mixtral":
-        encryption_status = "client-side ML-KEM wrapping"
-        target_node = "AMD-Instinct-MI300X-Private-Pod-01 (Mixtral-8x7B)"
+        target_node = "AMD-Instinct-MI300X-Private-Pod (Qwen3-0.6B)"
     else:  # secure_fallback
         encryption_status = "client-side ML-KEM wrapping (emergency fallback)"
         target_node = "Fireworks AI (Encrypted PQC Tunnel — Disaster Recovery)"
@@ -1634,7 +1611,7 @@ async def gateway_chat_stream(
                     return
 
         else:
-            # Private AMD pod routes (private_gemma / private_mixtral)
+            # Private AMD pod route (private_qwen)
             vllm_endpoint = VLLM_ENDPOINTS.get(model_name, "")
             vllm_ok = False
 

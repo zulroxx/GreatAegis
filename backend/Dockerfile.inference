@@ -3,16 +3,16 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 #
 # Purpose:  Run a locked vLLM inference server on AMD Instinct MI300X hardware
-#           serving either Mixtral-8x7B or Gemma-7B behind the GreatAegis gateway.
+#           serving GLM-5.2-FP8 behind the GreatAegis gateway.
 #
 # Target:   linux/amd64  (AMD EPYC + Instinct MI300X, ROCm 6.x)
 # Runtime:  < 60 s container initialisation, < 30 s first-token latency
 #
 # Build:
 #   docker build -f Dockerfile.inference \
-#     --build-arg MODEL=mixtral-8x7b \
+#     --build-arg MODEL=GLM-5.2-FP8 \
 #     --platform linux/amd64 \
-#     -t greataegis-inference:mixtral .
+#     -t greataegis-inference:glm .
 #
 # Run:
 #   docker run --device=/dev/kfd --device=/dev/dri \
@@ -20,14 +20,14 @@
 #     -v /mnt/models:/models:ro \
 #     -v greataegis-cache:/cache \
 #     -p 8000:8000 \
-#     greataegis-inference:mixtral
+#     greataegis-inference:glm
 # ═══════════════════════════════════════════════════════════════════════════════
 
 FROM rocm/vllm:rocm6.2_mi300_ubuntu22.04_py3.10_vllm_0.6.4 AS base
 
 # ── Build arguments ─────────────────────────────────────────────────────────
-#   MODEL: "mixtral-8x7b" | "gemma-7b"
-ARG MODEL=mixtral-8x7b
+#   MODEL: "Qwen/Qwen3-0.6B" | "GLM-5.2-FP8"
+ARG MODEL=Qwen/Qwen3-0.6B
 ENV LOCKED_MODEL=${MODEL}
 
 # ── Metadata labels ─────────────────────────────────────────────────────────
@@ -97,10 +97,10 @@ CMD [ \
 # ═══════════════════════════════════════════════════════════════════════════════
 # Multi-model variant (optional second stage)
 # ═══════════════════════════════════════════════════════════════════════════════
-# Build with:  docker build --target gemma -f Dockerfile.inference ...
-# This produces a Gemma-7B image from the same Dockerfile.
+# Build with:  docker build --target alternate -f Dockerfile.inference ...
+# This produces an alternate model image from the same Dockerfile.
 
-FROM base AS gemma
-ARG MODEL=gemma-7b
+FROM base AS alternate
+ARG MODEL=Qwen/Qwen3-0.6B
 ENV LOCKED_MODEL=${MODEL}
-LABEL org.greataegis.model="gemma-7b"
+LABEL org.greataegis.model="${LOCKED_MODEL}"

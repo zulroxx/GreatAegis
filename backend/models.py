@@ -135,7 +135,7 @@ class HealthResponse(BaseModel):
     app_mode: str                  # "simulated" | "production"
     hardware_status: str = "simulated"  # "online" | "offline" | "simulated"
     vector_db: str                 # "connected" | "disconnected"
-    models_available: list[str]    # e.g. ["gemma-7b", "mixtral-8x7b"]
+    models_available: list[str]    # e.g. ["glm-5.2-fp8", "glm-5.2-fp8"]
 
 
 # ── Fireworks AI Chat (direct, user-picks-model) ─────────────────────────────
