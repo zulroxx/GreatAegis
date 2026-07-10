@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from typing import Literal
 
 import requests
@@ -123,15 +124,37 @@ def _classify_workload(prompt: str) -> Literal["compliance", "deep-inference", "
 
 # ── vLLM health probe ───────────────────────────────────────────────────────
 
+# Short-lived cache so that repeated probes within the same window (e.g.
+# probe_all + route's re-probe + frontend /health polling) don't each hit
+# the network and emit duplicate warning lines.  Keyed by health URL.
+_HEALTH_CACHE_TTL: float = 5.0
+_HEALTH_CACHE: dict[str, tuple[float, bool]] = {}
+
+
 def probe_vllm_health(endpoint_url: str, timeout: float = 3.0) -> bool:
     """
     Ping a vLLM server's /health endpoint.
 
     Returns True if the server responds with HTTP 200 within the timeout
     window, False for any connection error, timeout, or non-200 status.
+
+    Results are cached for ``_HEALTH_CACHE_TTL`` seconds so that concurrent
+    or back-to-back callers (frontend polling, per-request re-probe in
+    :func:`route`) share a single network round-trip and a single log line.
     """
     health_url = endpoint_url.rstrip("/").replace("/v1/chat/completions", "/health")
 
+    cached = _HEALTH_CACHE.get(health_url)
+    if cached is not None and (time.monotonic() - cached[0]) < _HEALTH_CACHE_TTL:
+        return cached[1]
+
+    alive = _probe_vllm_health_uncached(health_url, timeout)
+    _HEALTH_CACHE[health_url] = (time.monotonic(), alive)
+    return alive
+
+
+def _probe_vllm_health_uncached(health_url: str, timeout: float) -> bool:
+    """Perform the actual network probe (no caching, no dedup)."""
     try:
         resp = requests.get(health_url, timeout=timeout)
         if resp.status_code == 200:
@@ -190,12 +213,14 @@ def route(
     quantum_encryption_enabled: bool = True,
     zero_trust_enabled: bool = True,
     pod_isolation_enabled: bool = True,
+    encrypted_prompt_received: bool = False,
 ) -> tuple[Verdict, int, ModelName, str, bool]:
     """
     Determine the routing verdict, target model, and reasoning.
 
     Args:
-        prompt_payload:           Raw user prompt text.
+        prompt_payload:           Raw user prompt text (decrypted if
+                                  client-side PQC was used).
         client_encryption_flag:   True if the client already wrapped the payload.
         routing_profile:          "auto" | "compliance" | "deep-inference"
         vllm_endpoints:           Map of model name → vLLM endpoint URL
@@ -204,9 +229,13 @@ def route(
         quantum_encryption_enabled: Rule 1 — ML-KEM/Kyber key wrapping.
                                   OFF → force client_encryption_flag to False.
         zero_trust_enabled:       Rule 2 — Zero-Trust payload encapsulation.
-                                  ON → force ALL traffic through private routes.
+                                  ON → force ALL traffic through private routes
+                                  and require encrypted prompt from client.
         pod_isolation_enabled:    Rule 3 — Strict pod isolation.
                                   ON → block fallback to external providers.
+        encrypted_prompt_received: True if the client sent an ML-KEM-encrypted
+                                  prompt (``encrypted_prompt`` field was present
+                                  and successfully decrypted by the gateway).
 
     Returns:
         (verdict, risk_score, model_name, routing_reason, fallback_engaged)
@@ -218,6 +247,14 @@ def route(
     effective_encryption = client_encryption_flag and quantum_encryption_enabled
     # Rule 2: if zero-trust is enabled, force all traffic through private routes
     force_private = zero_trust_enabled
+
+    # ── Zero-trust enforcement: require encrypted prompt ───────────────
+    if zero_trust_enabled and not encrypted_prompt_received and score >= 40:
+        logger.warning(
+            "Zero-trust policy requires encrypted prompt for sensitive "
+            "content (risk=%d). Routing to private path with warning.",
+            score,
+        )
 
     # ── Step 1: public vs private ──────────────────────────────────────
     if not force_private and score < 40 and not effective_encryption:

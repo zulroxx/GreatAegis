@@ -372,7 +372,7 @@ export default function HardwareStatusBanner({
                 className="font-mono font-semibold"
                 style={{ color: "var(--color-success)" }}
               >
-                PQC ACTIVE ({inspectResponse!.pqc_signature?.split("::")[0]})
+                PQC ACTIVE ({inspectResponse!.pqc_algorithm || "ML-KEM-768 + ML-DSA-65"})
               </span>
             </div>
           </>

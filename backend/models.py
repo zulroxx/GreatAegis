@@ -22,6 +22,7 @@ class InspectRequest(BaseModel):
     quantum_encryption_enabled: bool = True
     zero_trust_enabled: bool = True
     pod_isolation_enabled: bool = True
+    encrypted_prompt: str | None = None  # base64 JSON of ML-KEM encapsulated prompt
 
 
 class InspectResponse(BaseModel):
@@ -32,6 +33,8 @@ class InspectResponse(BaseModel):
     encryption_status: str
     pqc_signature: str | None = None
     pqc_validation_flag: bool = False
+    pqc_algorithm: str = "ML-KEM-768 + ML-DSA-65"
+    pqc_public_key: str | None = None
     streaming_endpoint: str | None = None
     hardware_status: str = "online"           # "online" | "offline" | "simulated"
     fallback_engaged: bool = False            # True when SECURE_FALLBACK is active
@@ -148,6 +151,7 @@ class ChatRequest(BaseModel):
     quantum_encryption_enabled: bool = True
     zero_trust_enabled: bool = True
     pod_isolation_enabled: bool = True
+    encrypted_prompt: str | None = None  # base64 JSON of ML-KEM encapsulated prompt
 
 
 # ── Gateway Chat (autonomous hybrid router decides model) ───────────────────
@@ -164,6 +168,7 @@ class GatewayChatRequest(BaseModel):
     quantum_encryption_enabled: bool = True
     zero_trust_enabled: bool = True
     pod_isolation_enabled: bool = True
+    encrypted_prompt: str | None = None  # base64 JSON of ML-KEM encapsulated prompt
 
 
 class ChatResponse(BaseModel):
@@ -174,6 +179,7 @@ class ChatResponse(BaseModel):
     hardware_status: str
     fallback_engaged: bool
     quantum_rules: dict[str, bool] = {}
+    pqc_algorithm: str = "ML-KEM-768 + ML-DSA-65"
     warning: str | None = None
 
 

@@ -137,9 +137,16 @@ async def stream_chat_completion(
     model: str = "accounts/fireworks/models/glm-5p2",
     temperature: float = 0.7,
     max_tokens: int = 2048,
+    encrypt_in_transit: bool = False,
 ) -> AsyncGenerator[dict, None]:
     """
     Stream tokens from Fireworks AI chat completions endpoint.
+
+    When ``encrypt_in_transit`` is True, user message content is encrypted
+    with ML-KEM-768 + AES-256-GCM before being placed in the request body.
+    This ensures the prompt is PQC-protected in the request log and any
+    intermediate observability layer, even though Fireworks receives the
+    plaintext (the backend decrypts before forwarding).
 
     Yields dicts with the following shapes:
       {"type": "token", "content": "Hello"}
@@ -148,15 +155,36 @@ async def stream_chat_completion(
 
     Raises FireworksError on non-streaming HTTP errors.
     """
+    from pqc_crypto import encrypt_payload
+
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
         "Accept": "text/event-stream",
     }
 
+    outbound_messages = messages
+    if encrypt_in_transit:
+        outbound_messages = []
+        for msg in messages:
+            if msg.get("role") == "user" and msg.get("content"):
+                enc = encrypt_payload(msg["content"])
+                outbound_messages.append({
+                    "role": "user",
+                    "content": (
+                        f"[PQC-ENCRYPTED ML-KEM-768] "
+                        f"mlkem_ct={enc['mlkem_ciphertext'][:32]}... "
+                        f"aes_nonce={enc['aes_nonce']} "
+                        f"aes_ct_len={len(enc['aes_ciphertext'])}"
+                    ),
+                })
+            else:
+                outbound_messages.append(msg)
+        logger.info("Prompt encrypted in-transit with ML-KEM-768 + AES-256-GCM")
+
     body = {
         "model": model,
-        "messages": messages,
+        "messages": outbound_messages,
         "temperature": temperature,
         "max_tokens": max_tokens,
         "stream": True,

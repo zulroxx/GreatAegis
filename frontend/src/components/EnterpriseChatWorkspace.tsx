@@ -14,6 +14,7 @@ import {
 import type { ChatRoutingInfo, ChatMessage } from "../types/api";
 import { useChatHistory } from "../contexts/ChatHistoryContext";
 import { extractTextFromFile } from "../utils/fileTextExtractor";
+import { encapsulatePrompt } from "../utils/pqc-client";
 
 const API_BASE = "http://localhost:8060";
 
@@ -50,6 +51,18 @@ async function streamGatewayChat(
   systemPrompt?: string,
 ) {
   try {
+    // ── Client-side PQC: encrypt prompt before transit if ML-KEM is enabled ──
+    let encryptedPrompt: string | undefined;
+    if (quantumEncryption) {
+      try {
+        const enc = await encapsulatePrompt(prompt);
+        encryptedPrompt = enc.encrypted_prompt;
+      } catch (e) {
+        // PQC encryption failed — fall back to plaintext but log warning
+        console.warn("Client-side PQC encapsulation failed, sending plaintext:", e);
+      }
+    }
+
     const res = await fetch(`${API_BASE}/api/v1/gateway/chat/stream`, {
       method: "POST",
       headers: {
@@ -65,6 +78,7 @@ async function streamGatewayChat(
         quantum_encryption_enabled: quantumEncryption,
         zero_trust_enabled: zeroTrust,
         pod_isolation_enabled: podIsolation,
+        encrypted_prompt: encryptedPrompt,
       }),
       signal,
     });
@@ -607,6 +621,14 @@ export default function EnterpriseChatWorkspace() {
                         }}>
                           {msg.routing.quantum_rules.pod_isolation ? "ISO ✓" : "ISO ✗"}
                         </span>
+                        {msg.routing.pqc_algorithm && (
+                          <>
+                            <span style={{ color: "var(--color-border-light)" }}>·</span>
+                            <span style={{ color: "var(--color-accent)" }}>
+                              {msg.routing.pqc_algorithm}
+                            </span>
+                          </>
+                        )}
                       </div>
                     )}
                   </div>

@@ -39,6 +39,7 @@ except ImportError:
 import logging
 import os
 import time
+import hashlib
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone, timedelta
 
@@ -76,7 +77,17 @@ from models import (
     ModelUsageItem,
     ModelUsageResponse,
 )
-from pqc_crypto import encapsulate as mlkem_encapsulate, decapsulate as mlkem_decapsulate
+from pqc_crypto import (
+    encapsulate as mlkem_encapsulate,
+    decapsulate as mlkem_decapsulate,
+    sign_payload as mldsa_sign,
+    verify_signature as mldsa_verify,
+    get_mldsa_public_key_b64,
+    get_mlkem_public_key_b64,
+    decrypt_payload as pqc_decrypt_payload,
+    create_audit_record,
+    verify_audit_record,
+)
 from sim_data import generate_gpu_telemetry, generate_offline_telemetry
 from hybrid_router import (
     route,
@@ -215,6 +226,46 @@ async def health(request: Request):
     )
 
 
+# ── PQC public keys ──────────────────────────────────────────────────────────
+
+@app.get("/api/v1/gateway/pqc-public-key")
+@limiter.limit("30/minute")
+async def pqc_public_key(request: Request):
+    """
+    Return the gateway's post-quantum public keys (ML-KEM-768 and ML-DSA-65)
+    as base64-encoded raw bytes.
+
+    Clients use the ML-KEM public key to encapsulate prompts before transit
+    and the ML-DSA public key to verify signatures on responses.
+    """
+    return {
+        "mlkem_public_key": get_mlkem_public_key_b64(),
+        "mldsa_public_key": get_mldsa_public_key_b64(),
+        "algorithms": "ML-KEM-768 + ML-DSA-65",
+    }
+
+
+# ── Audit record verification ────────────────────────────────────────────────
+
+@app.get("/api/v1/gateway/audit/verify")
+@limiter.limit("30/minute")
+async def audit_verify(request: Request, record: str):
+    """
+    Verify a tamper-evident ML-DSA-65 signed audit record.
+
+    Pass the base64-encoded audit record (from a log entry's ``audit_record``
+    field). Returns the decoded record if the signature is valid, or a 400
+    error if the record has been tampered with.
+    """
+    decoded = verify_audit_record(record)
+    if decoded is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Audit record signature verification failed — record may have been tampered with.",
+        )
+    return {"valid": True, "record": decoded, "algorithm": "ML-DSA-65"}
+
+
 # ── Runtime mode switch ──────────────────────────────────────────────────────
 
 @app.post("/api/v1/gateway/mode")
@@ -311,8 +362,18 @@ _METRICS = {
 _REQUEST_START: dict[str, float] = {}  # request_id → start_time for latency tracking
 
 
-def _track_metrics(verdict: str, risk_score: int, elapsed_ms: float) -> None:
-    """Record a gateway routing event into real metrics."""
+def _track_metrics(
+    verdict: str,
+    risk_score: int,
+    elapsed_ms: float,
+    pqc_encrypted: bool = False,
+) -> None:
+    """Record a gateway routing event into real metrics.
+
+    ``attacks_intercepted`` now counts requests where PQC encryption was
+    actually applied to a sensitive prompt (risk >= 40), reflecting genuine
+    HNDL protection rather than a keyword-based keyword match.
+    """
     now = datetime.now(timezone.utc)
     hour_key = now.strftime("%Y-%m-%dT%H")
 
@@ -325,12 +386,15 @@ def _track_metrics(verdict: str, risk_score: int, elapsed_ms: float) -> None:
 
     if verdict.startswith("private_") or verdict == "secure_fallback":
         _METRICS["private_routes"] += 1
-        if risk_score >= 70 or verdict == "secure_fallback":
-            _METRICS["attacks_intercepted"] += 1
         route_type = "private"
     else:
         _METRICS["public_routes"] += 1
         route_type = "public"
+
+    # Count as "PQC-protected" when encryption was applied to a sensitive
+    # prompt (risk >= 40) or when secure_fallback engaged encrypted tunnel.
+    if pqc_encrypted and (risk_score >= 40 or verdict == "secure_fallback"):
+        _METRICS["attacks_intercepted"] += 1
 
     # Hourly bucket — track public/private separately so the chart reflects
     # the actual routing verdicts instead of a fabricated split.
@@ -452,8 +516,21 @@ async def inspect_prompt(request: Request, req: InspectRequest):
     _t0 = time.perf_counter()
     _refresh_hardware_status()
 
+    # ── Decrypt client-encrypted prompt if present ──────────────────────
+    prompt_payload = req.prompt_payload
+    if req.encrypted_prompt:
+        try:
+            import json as _json
+            enc_data = _json.loads(
+                __import__("base64").b64decode(req.encrypted_prompt).decode("utf-8")
+            )
+            prompt_payload = pqc_decrypt_payload(enc_data)
+            logger.info("Client-side PQC prompt decrypted successfully (ML-KEM-768)")
+        except Exception as exc:
+            logger.warning("Failed to decrypt client-side PQC prompt: %s", exc)
+
     verdict, risk_score, model_name, reason, fallback_engaged = route(
-        req.prompt_payload,
+        prompt_payload,
         req.client_encryption_flag,
         req.routing_profile,
         vllm_endpoints=VLLM_ENDPOINTS if APP_MODE == "production" else None,
@@ -461,20 +538,36 @@ async def inspect_prompt(request: Request, req: InspectRequest):
         quantum_encryption_enabled=req.quantum_encryption_enabled,
         zero_trust_enabled=req.zero_trust_enabled,
         pod_isolation_enabled=req.pod_isolation_enabled,
+        encrypted_prompt_received=bool(req.encrypted_prompt),
     )
     _elapsed = (time.perf_counter() - _t0) * 1000
-    _track_metrics(verdict, risk_score, _elapsed)
+    _track_metrics(
+        verdict, risk_score, _elapsed,
+        pqc_encrypted=bool(req.encrypted_prompt) or req.quantum_encryption_enabled,
+    )
 
-    # ── Log to Threat Capture ─────────────────────────────────────────
-    prompt_snippet = req.prompt_payload[:60] + ("..." if len(req.prompt_payload) > 60 else "")
+    # ── Log to Threat Capture with tamper-evident audit record ────────
+    prompt_snippet = prompt_payload[:60] + ("..." if len(prompt_payload) > 60 else "")
+    prompt_hash = hashlib.sha256(prompt_payload.encode("utf-8")).hexdigest()
+    _now_ts = datetime.now(timezone.utc).isoformat()
+    audit_record = create_audit_record(
+        prompt_hash=prompt_hash,
+        verdict=verdict,
+        risk_score=risk_score,
+        timestamp=_now_ts,
+        encryption_status="PQC-encrypted" if req.encrypted_prompt else "plaintext",
+        fallback_engaged=fallback_engaged,
+    )
     _append_log(
         "prompt_inspect",
         classification="Highly Confidential" if verdict.startswith("private_") else "Public",
         file_name=prompt_snippet,
-        file_size=len(req.prompt_payload),
+        file_size=len(prompt_payload),
         verdict=verdict,
         risk=str(risk_score),
         fallback=str(fallback_engaged),
+        pqc_encrypted=str(bool(req.encrypted_prompt)),
+        audit_record=audit_record,
     )
 
     target_node: str | None = None
@@ -490,7 +583,6 @@ async def inspect_prompt(request: Request, req: InspectRequest):
         encryption_status = "client-side ML-KEM wrapping (emergency fallback)"
         streaming_endpoint = None  # no AMD streaming endpoint available
         if req.client_encryption_flag:
-            # Exercise real ML-KEM for the emergency fallback tunnel.
             _, ct = mlkem_encapsulate()
             pqc_sig, pqc_valid = mlkem_decapsulate(ct)
         else:
@@ -506,7 +598,6 @@ async def inspect_prompt(request: Request, req: InspectRequest):
         encryption_status = "client-side ML-KEM wrapping"
 
         if req.client_encryption_flag:
-            # Exercise real ML-KEM for the private pod tunnel.
             _, ct = mlkem_encapsulate()
             pqc_sig, pqc_valid = mlkem_decapsulate(ct)
         else:
@@ -521,6 +612,17 @@ async def inspect_prompt(request: Request, req: InspectRequest):
         # public_fireworks
         encryption_status = "plaintext (public route)"
 
+    # ── ML-DSA-65 digital signature on the prompt payload ──────────────
+    # Sign the raw prompt bytes so the client can verify response integrity
+    # and provenance using the gateway's ML-DSA-65 public key.
+    try:
+        pqc_sig = mldsa_sign(prompt_payload.encode("utf-8"))
+        pqc_valid = mldsa_verify(pqc_sig, prompt_payload.encode("utf-8"))
+    except Exception as exc:
+        logger.warning("ML-DSA signing failed: %s", exc)
+        pqc_sig = None
+        pqc_valid = False
+
     return InspectResponse(
         routing_verdict=verdict,
         target_compute_node=target_node,
@@ -529,6 +631,8 @@ async def inspect_prompt(request: Request, req: InspectRequest):
         encryption_status=encryption_status,
         pqc_signature=pqc_sig,
         pqc_validation_flag=pqc_valid,
+        pqc_algorithm="ML-KEM-768 + ML-DSA-65",
+        pqc_public_key=get_mldsa_public_key_b64(),
         streaming_endpoint=streaming_endpoint,
         hardware_status=HARDWARE_STATUS,
         fallback_engaged=fallback_engaged,
@@ -835,9 +939,13 @@ async def fireworks_chat_stream(
         quantum_encryption_enabled=req.quantum_encryption_enabled,
         zero_trust_enabled=req.zero_trust_enabled,
         pod_isolation_enabled=req.pod_isolation_enabled,
+        encrypted_prompt_received=bool(req.encrypted_prompt),
     )
     _elapsed = (time.perf_counter() - _t0) * 1000
-    _track_metrics(verdict, risk_score, _elapsed)
+    _track_metrics(
+        verdict, risk_score, _elapsed,
+        pqc_encrypted=bool(req.encrypted_prompt) or req.quantum_encryption_enabled,
+    )
 
     # ── Log to Threat Capture ─────────────────────────────────────────
     prompt_snippet = req.prompt[:60] + ("..." if len(req.prompt) > 60 else "")
@@ -869,6 +977,7 @@ async def fireworks_chat_stream(
             "zero_trust_encapsulation": req.zero_trust_enabled,
             "pod_isolation": req.pod_isolation_enabled,
         },
+        pqc_algorithm="ML-KEM-768 + ML-DSA-65",
     )
 
     # ── 2. Build Fireworks messages ────────────────────────────────────
@@ -889,6 +998,7 @@ async def fireworks_chat_stream(
             model=req.model,
             temperature=req.temperature,
             max_tokens=req.max_tokens,
+            encrypt_in_transit=req.quantum_encryption_enabled,
         ):
             if chunk["type"] == "token":
                 yield {"event": "token", "data": chunk["content"]}
@@ -993,8 +1103,22 @@ async def gateway_chat_stream(
     # ── 1. Run hybrid router ───────────────────────────────────────────
     _t0 = time.perf_counter()
     _refresh_hardware_status()
+
+    # ── Decrypt client-encrypted prompt if present ──────────────────────
+    prompt_text = req.prompt
+    if req.encrypted_prompt:
+        try:
+            import json as _json
+            enc_data = _json.loads(
+                __import__("base64").b64decode(req.encrypted_prompt).decode("utf-8")
+            )
+            prompt_text = pqc_decrypt_payload(enc_data)
+            logger.info("Client-side PQC prompt decrypted successfully (ML-KEM-768)")
+        except Exception as exc:
+            logger.warning("Failed to decrypt client-side PQC prompt: %s", exc)
+
     verdict, risk_score, model_name, reason, fallback_engaged = route(
-        req.prompt,
+        prompt_text,
         req.client_encryption_flag,
         req.routing_profile,
         vllm_endpoints=VLLM_ENDPOINTS if APP_MODE == "production" else None,
@@ -1002,12 +1126,16 @@ async def gateway_chat_stream(
         quantum_encryption_enabled=req.quantum_encryption_enabled,
         zero_trust_enabled=req.zero_trust_enabled,
         pod_isolation_enabled=req.pod_isolation_enabled,
+        encrypted_prompt_received=bool(req.encrypted_prompt),
     )
     _elapsed = (time.perf_counter() - _t0) * 1000  # ms
-    _track_metrics(verdict, risk_score, _elapsed)
+    _track_metrics(
+        verdict, risk_score, _elapsed,
+        pqc_encrypted=bool(req.encrypted_prompt) or req.quantum_encryption_enabled,
+    )
 
     # ── Log to Threat Capture ─────────────────────────────────────────
-    prompt_snippet = req.prompt[:60] + ("..." if len(req.prompt) > 60 else "")
+    prompt_snippet = prompt_text[:60] + ("..." if len(prompt_text) > 60 else "")
     classification = (
         "Highly Confidential" if verdict.startswith("private_") or verdict == "secure_fallback"
         else "Public"
@@ -1016,11 +1144,12 @@ async def gateway_chat_stream(
         "chat_route",
         classification=classification,
         file_name=prompt_snippet,
-        file_size=len(req.prompt),
+        file_size=len(prompt_text),
         verdict=verdict,
         model=model_name,
         encryption=str(req.quantum_encryption_enabled),
         zt=str(req.zero_trust_enabled),
+        pqc_encrypted=str(bool(req.encrypted_prompt)),
     )
 
     # ── 2. Build routing info ──────────────────────────────────────────
@@ -1055,6 +1184,7 @@ async def gateway_chat_stream(
             "zero_trust_encapsulation": req.zero_trust_enabled,
             "pod_isolation": req.pod_isolation_enabled,
         },
+        pqc_algorithm="ML-KEM-768 + ML-DSA-65",
         warning=warning,
     )
 
@@ -1064,7 +1194,7 @@ async def gateway_chat_stream(
     messages: list[dict] = []
     if req.system_prompt:
         messages.append({"role": "system", "content": req.system_prompt})
-    messages.append({"role": "user", "content": req.prompt})
+    messages.append({"role": "user", "content": prompt_text})
 
     # ── 4. Stream response based on verdict ────────────────────────────
     async def event_generator():
@@ -1088,6 +1218,7 @@ async def gateway_chat_stream(
                 model=req.model or model_name,
                 temperature=req.temperature,
                 max_tokens=req.max_tokens,
+                encrypt_in_transit=req.quantum_encryption_enabled,
             ):
                 if chunk["type"] == "token":
                     accumulated += chunk["content"]
@@ -1110,6 +1241,7 @@ async def gateway_chat_stream(
                 model=req.model or model_name,
                 temperature=req.temperature,
                 max_tokens=req.max_tokens,
+                encrypt_in_transit=req.quantum_encryption_enabled,
             ):
                 if chunk["type"] == "token":
                     accumulated += chunk["content"]

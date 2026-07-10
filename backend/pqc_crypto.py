@@ -1,15 +1,15 @@
 """
-Real ML-KEM-768 post-quantum cryptography helpers.
+Post-quantum cryptography helpers for GreatAegis AI Gateway.
 
-Uses the NIST-standard ML-KEM algorithm provided by `cryptography>=49.0.0`.
-All key material, ciphertexts and shared secrets are handled as raw bytes;
-wire-facing payloads are base64-encoded for JSON compatibility.
+Implements two NIST-standardised PQC algorithms via `cryptography>=49.0.0`:
 
-Also provides AES-256-GCM symmetric encryption for document chunk protection.
-Each chunk is encrypted with a fresh AES key, and that AES key is wrapped
-using an ML-KEM shared secret (hybrid encryption). This means the vector DB
-never stores usable plaintext keys: a copy of the persistent ML-KEM private
-key is required to decrypt any document.
+  - **ML-KEM-768** (FIPS 203, formerly Kyber) — key encapsulation for
+    hybrid AES-256-GCM encryption of document chunks and prompt payloads.
+  - **ML-DSA-65** (FIPS 204, formerly Dilithium) — digital signatures for
+    tamper-evident audit records and response integrity verification.
+
+All key material, ciphertexts, signatures and shared secrets are handled as
+raw bytes; wire-facing payloads are base64-encoded for JSON compatibility.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ import logging
 import os
 from typing import Tuple
 
-from cryptography.hazmat.primitives.asymmetric import mlkem
+from cryptography.hazmat.primitives.asymmetric import mldsa, mlkem
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 logger = logging.getLogger("great_aegis.pqc_crypto")
@@ -38,6 +38,13 @@ class PQCNotInitializedError(RuntimeError):
 
 
 _MLKEM_SEED_SIZE = 64  # ML-KEM-768 deterministic key generation uses 64 bytes.
+
+# ── ML-DSA-65 (Dilithium) signing key pair ──────────────────────────────────
+
+_MLDSA_PRIVATE_KEY: mldsa.MLDSA65PrivateKey | None = None
+_MLDSA_PUBLIC_KEY: mldsa.MLDSA65PublicKey | None = None
+
+_MLDSA_SEED_SIZE = 32  # ML-DSA-65 deterministic key generation uses 32 bytes.
 
 
 def _ensure_mlkem() -> None:
@@ -125,6 +132,80 @@ def decapsulate(ciphertext: str | bytes) -> Tuple[str, bool]:
         return ("", False)
 
 
+# ── ML-DSA-65 (Dilithium) digital signatures ────────────────────────────────
+
+
+def _ensure_mldsa() -> None:
+    """Initialize the ML-DSA-65 signing key pair if not yet initialized."""
+    global _MLDSA_PRIVATE_KEY, _MLDSA_PUBLIC_KEY
+    if _MLDSA_PRIVATE_KEY is not None:
+        return
+
+    seed_hex = os.environ.get("GREATAEGIS_MLDSA_SEED")
+    if seed_hex:
+        try:
+            seed = bytes.fromhex(seed_hex)
+        except ValueError as exc:
+            raise ValueError("GREATAEGIS_MLDSA_SEED must be a valid hex string") from exc
+        if len(seed) != _MLDSA_SEED_SIZE:
+            raise ValueError(
+                f"GREATAEGIS_MLDSA_SEED must decode to {_MLDSA_SEED_SIZE} bytes, got {len(seed)}"
+            )
+    else:
+        seed = os.urandom(_MLDSA_SEED_SIZE)
+        logger.warning(
+            "GREATAEGIS_MLDSA_SEED is not set. Generating an ephemeral ML-DSA-65 key pair. "
+            "Signatures will not verify after the next server restart."
+        )
+
+    _MLDSA_PRIVATE_KEY = mldsa.MLDSA65PrivateKey.from_seed_bytes(seed)
+    _MLDSA_PUBLIC_KEY = _MLDSA_PRIVATE_KEY.public_key()
+
+
+def init_mldsa(seed: bytes | None = None) -> None:
+    """Explicitly initialize ML-DSA-65 from a 32-byte seed."""
+    global _MLDSA_PRIVATE_KEY, _MLDSA_PUBLIC_KEY
+    if seed is not None and len(seed) != _MLDSA_SEED_SIZE:
+        raise ValueError(f"ML-DSA seed must be {_MLDSA_SEED_SIZE} bytes")
+    _MLDSA_PRIVATE_KEY = mldsa.MLDSA65PrivateKey.from_seed_bytes(
+        seed or os.urandom(_MLDSA_SEED_SIZE)
+    )
+    _MLDSA_PUBLIC_KEY = _MLDSA_PRIVATE_KEY.public_key()
+
+
+def get_mldsa_public_key_b64() -> str:
+    """Return the persistent ML-DSA-65 public key as a base64 string."""
+    _ensure_mldsa()
+    return base64.b64encode(_MLDSA_PUBLIC_KEY.public_bytes_raw()).decode()
+
+
+def sign_payload(payload: bytes) -> str:
+    """
+    Sign arbitrary bytes with the gateway's ML-DSA-65 private key.
+
+    Returns a base64-encoded signature (~3309 bytes raw).
+    """
+    _ensure_mldsa()
+    signature = _MLDSA_PRIVATE_KEY.sign(payload)
+    return base64.b64encode(signature).decode()
+
+
+def verify_signature(signature_b64: str, payload: bytes) -> bool:
+    """
+    Verify an ML-DSA-65 signature against the given payload.
+
+    Returns True if the signature is valid, False otherwise.
+    """
+    _ensure_mldsa()
+    try:
+        signature = base64.b64decode(signature_b64, validate=True)
+        _MLDSA_PUBLIC_KEY.verify(signature, payload)
+        return True
+    except Exception as exc:
+        logger.warning("ML-DSA signature verification failed: %s", exc)
+        return False
+
+
 # ── AES-256-GCM symmetric encryption for document chunks ───────────────────
 
 
@@ -178,3 +259,117 @@ def decrypt_chunk(encrypted: dict) -> str:
     nonce = base64.b64decode(encrypted["nonce"])
     ciphertext = base64.b64decode(encrypted["ciphertext"])
     return aesgcm.decrypt(nonce, ciphertext, None).decode("utf-8")
+
+
+# ── Payload-in-transit encryption (PQC tunnel) ──────────────────────────────
+
+
+def encrypt_payload(plaintext: str) -> dict:
+    """
+    Hybrid-encrypt a prompt payload for transit.
+
+    Uses the same ML-KEM-768 + AES-256-GCM construction as ``encrypt_chunk``
+    but with a streamlined output schema suitable for prompt encapsulation.
+    The encrypted payload can only be decrypted by the holder of the
+    gateway's ML-KEM private key.
+
+    Returns a JSON-friendly dict with:
+      - mlkem_ciphertext: ML-KEM encapsulation ciphertext (base64)
+      - aes_nonce: AES-256-GCM nonce (base64)
+      - aes_ciphertext: encrypted payload (base64)
+    """
+    _ensure_mlkem()
+
+    shared_secret, mlkem_ciphertext = _MLKEM_PUBLIC_KEY.encapsulate()
+    aesgcm = AESGCM(shared_secret)
+    nonce = os.urandom(12)
+    ciphertext = aesgcm.encrypt(nonce, plaintext.encode("utf-8"), None)
+
+    return {
+        "mlkem_ciphertext": base64.b64encode(mlkem_ciphertext).decode(),
+        "aes_nonce": base64.b64encode(nonce).decode(),
+        "aes_ciphertext": base64.b64encode(ciphertext).decode(),
+    }
+
+
+def decrypt_payload(encrypted: dict) -> str:
+    """
+    Reverse ``encrypt_payload``.
+
+    Accepts a dict with ``mlkem_ciphertext``, ``aes_nonce``, and
+    ``aes_ciphertext`` (all base64). Returns the decrypted plaintext string.
+    """
+    _ensure_mlkem()
+
+    mlkem_ciphertext = base64.b64decode(encrypted["mlkem_ciphertext"])
+    shared_secret = _MLKEM_PRIVATE_KEY.decapsulate(mlkem_ciphertext)
+    aesgcm = AESGCM(shared_secret)
+    nonce = base64.b64decode(encrypted["aes_nonce"])
+    ciphertext = base64.b64decode(encrypted["aes_ciphertext"])
+    return aesgcm.decrypt(nonce, ciphertext, None).decode("utf-8")
+
+
+# ── Tamper-evident audit records (ML-DSA-65 signed) ─────────────────────────
+
+import json as _json
+
+
+def create_audit_record(
+    prompt_hash: str,
+    verdict: str,
+    risk_score: int,
+    timestamp: str,
+    encryption_status: str = "",
+    fallback_engaged: bool = False,
+) -> str:
+    """
+    Create a tamper-evident audit record signed with ML-DSA-65.
+
+    The record is a JSON document containing the routing decision metadata,
+    signed by the gateway's ML-DSA-65 private key. Any modification to the
+    record after signing will cause ``verify_audit_record`` to fail.
+
+    Returns a base64-encoded signed JSON envelope:
+      {"record": {...}, "signature": "<base64 ML-DSA-65 signature>"}
+    """
+    record = {
+        "prompt_hash": prompt_hash,
+        "verdict": verdict,
+        "risk_score": risk_score,
+        "timestamp": timestamp,
+        "encryption_status": encryption_status,
+        "fallback_engaged": fallback_engaged,
+        "algorithm": "ML-DSA-65",
+    }
+
+    record_json = _json.dumps(record, sort_keys=True, separators=(",", ":"))
+    signature = sign_payload(record_json.encode("utf-8"))
+
+    envelope = {
+        "record": record,
+        "signature": signature,
+    }
+    return base64.b64encode(
+        _json.dumps(envelope, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).decode()
+
+
+def verify_audit_record(record_b64: str) -> dict | None:
+    """
+    Verify a tamper-evident audit record.
+
+    Returns the decoded record dict if the ML-DSA-65 signature is valid,
+    or None if verification fails (the record has been tampered with).
+    """
+    try:
+        envelope = _json.loads(base64.b64decode(record_b64).decode("utf-8"))
+        record = envelope["record"]
+        signature = envelope["signature"]
+
+        record_json = _json.dumps(record, sort_keys=True, separators=(",", ":"))
+        if verify_signature(signature, record_json.encode("utf-8")):
+            return record
+        return None
+    except Exception as exc:
+        logger.warning("Audit record verification failed: %s", exc)
+        return None
