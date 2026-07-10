@@ -229,7 +229,7 @@ export default function GPUPanel() {
                   <div>
                     <p className="text-[10px]" style={{ color: "var(--color-text-muted)" }}>Core Clock</p>
                     <p className="text-sm font-semibold font-mono" style={{ color: "var(--color-text-secondary)" }}>
-                      {device.sclk_mhz} MHz
+                      {device.sclk_mhz > 0 ? `${device.sclk_mhz} MHz` : "N/A"}
                     </p>
                   </div>
                 </div>
@@ -240,7 +240,7 @@ export default function GPUPanel() {
                   <div>
                     <p className="text-[10px]" style={{ color: "var(--color-text-muted)" }}>Mem Clock</p>
                     <p className="text-sm font-semibold font-mono" style={{ color: "var(--color-text-secondary)" }}>
-                      {device.mclk_mhz} MHz
+                      {device.mclk_mhz > 0 ? `${device.mclk_mhz} MHz` : "N/A"}
                     </p>
                   </div>
                 </div>

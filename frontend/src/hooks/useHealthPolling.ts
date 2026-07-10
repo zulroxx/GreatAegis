@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 
-const API_BASE = "http://localhost:8060";
+const API_BASE = import.meta.env.VITE_API_BASE_URL;
 const POLL_INTERVAL = 5_000; // 5 seconds — aligned with other polling hooks
 
 export interface HealthData {

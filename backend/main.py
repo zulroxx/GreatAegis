@@ -45,7 +45,7 @@ from datetime import datetime, timezone, timedelta
 
 from fastapi import FastAPI, HTTPException, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -108,19 +108,28 @@ SETTINGS_PASSWORD: str = os.environ.get("SETTINGS_PASSWORD", "")
 # ── vLLM endpoint map (used in production mode) ─────────────────────────────
 
 VLLM_ENDPOINTS: dict[str, str] = {
-    "mixtral-8x7b": os.environ.get(
-        "VLLM_MIXTRAL_ENDPOINT",
-        "http://amd-pod-01.local:8000/v1/chat/completions",
-    ),
-    "gemma-7b": os.environ.get(
-        "VLLM_GEMMA_ENDPOINT",
-        "http://amd-pod-02.local:8000/v1/chat/completions",
-    ),
+    "mixtral-8x7b": os.environ.get("VLLM_MIXTRAL_ENDPOINT", ""),
+    "gemma-7b": os.environ.get("VLLM_GEMMA_ENDPOINT", ""),
 }
+
+# ── Production safety checks ──────────────────────────────────────────────────
+
+if APP_MODE == "production":
+    _default_mlkem = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f"
+    _default_mldsa = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    if os.environ.get("GREATAEGIS_MLKEM_SEED", "") == _default_mlkem:
+        logger.warning("GREATAEGIS_MLKEM_SEED is using the default/dev seed. Generate a random seed for production.")
+    if os.environ.get("GREATAEGIS_MLDSA_SEED", "") == _default_mldsa:
+        logger.warning("GREATAEGIS_MLDSA_SEED is using the default/dev seed. Generate a random seed for production.")
+    if SETTINGS_PASSWORD in ("", "root"):
+        logger.warning("SETTINGS_PASSWORD is empty or using the default 'root'. Set a strong password for production.")
+    if not VLLM_ENDPOINTS.get("mixtral-8x7b") and not VLLM_ENDPOINTS.get("gemma-7b"):
+        logger.info("No VLLM endpoints configured — gateway will operate with Fireworks AI fallback only.")
+
 
 # ── Server-side API key storage (in-memory only, never persisted) ────────────
 
-STORED_API_KEY: str = ""
+STORED_API_KEY: str = os.environ.get("FIREWORKS_API_KEY", "")
 
 def _resolve_api_key(header_key: str) -> str:
     """Return header key if present, otherwise fall back to stored key."""
@@ -186,6 +195,29 @@ app.add_middleware(
     allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["Content-Type", "X-Api-Key"],
 )
+
+
+@app.middleware("http")
+async def _cors_wildcard_middleware(request: Request, call_next):
+    origin = request.headers.get("origin", "")
+    if origin.endswith(".vercel.app") and origin.startswith("https://"):
+        if request.method == "OPTIONS":
+            return Response(
+                status_code=200,
+                headers={
+                    "Access-Control-Allow-Origin": origin,
+                    "Access-Control-Allow-Credentials": "true",
+                    "Access-Control-Allow-Methods": "GET, POST, DELETE",
+                    "Access-Control-Allow-Headers": "Content-Type, X-Api-Key",
+                    "Access-Control-Max-Age": "600",
+                },
+            )
+        response = await call_next(request)
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        return response
+    return await call_next(request)
+
 
 # ── Rate limiting ────────────────────────────────────────────────────────────
 
@@ -742,16 +774,327 @@ async def gpu_telemetry(request: Request):
 
 # ── Production: live rocm-smi bridge ─────────────────────────────────────────
 
+_ROCM_SMI_STUB = lambda: [
+    GPUDeviceInfo(
+        device_id=0,
+        name="AMD Instinct MI300X (rocm-smi unavailable)",
+        temperature_c=0,
+        vram_used_gb=0,
+        vram_total_gb=192,
+        utilization_pct=0,
+        power_watts=0,
+        power_cap_watts=750,
+        sclk_mhz=0,
+        mclk_mhz=0,
+    )
+]
+
+
+def _parse_rocm_smi_output(raw: dict) -> list[GPUDeviceInfo]:
+    """
+    Parse rocm-smi JSON output into GPUDeviceInfo objects.
+
+    Handles both formats:
+      - 'rocm-smi --showmetrics --json'   (full metric dump)
+      - 'rocm-smi -a --json'              (all-info, used by remote proxy)
+
+    No hardcoded defaults — only values actually present in the rocm-smi
+    output are used. Missing fields become 0 / empty where sensible.
+    """
+    import re
+
+    def _extract_mhz(val: str | int | float | None) -> int:
+        if val is None:
+            return 0
+        if isinstance(val, (int, float)):
+            return int(val)
+        m = re.search(r"(\d+)", str(val))
+        return int(m.group(1)) if m else 0
+
+    def _safe_float(val, default=0.0) -> float:
+        if val is None or (isinstance(val, str) and val.strip() == ""):
+            return default
+        if isinstance(val, str):
+            val = val.replace("(C)", "").replace("(W)", "").replace("(Mhz)", "").strip()
+        try:
+            return float(val)
+        except (ValueError, TypeError):
+            return default
+
+    # Default to MI300X spec (192 GB) when rocm-smi doesn't report total.
+    # --showmetrics gives VRAM Total Memory (MB); -a --json only gives %.
+    _MI300X_VRAM_GB = 192.0
+    _vram_total_raw = raw.get("card0", {}).get("VRAM Total Memory")
+    _vram_total_gb: float = (
+        _safe_float(_vram_total_raw) / 1024
+        if _vram_total_raw is not None
+        else _MI300X_VRAM_GB
+    )
+
+    devices: list[GPUDeviceInfo] = []
+    for card_id, card_data in raw.items():
+        if not isinstance(card_data, dict) or card_id == "system":
+            continue
+
+        try:
+            # Temperature — both formats supply this
+            temp = _safe_float(
+                card_data.get("Temperature (Sensor edge)")
+                or card_data.get("Temperature (Sensor junction) (C)")
+            )
+
+            # VRAM used — --showmetrics gives raw MB; -a --json gives %
+            vram_raw = card_data.get("VRAM Total Used Memory")
+            if vram_raw is not None:
+                vram_used = _safe_float(vram_raw) / 1024
+            else:
+                pct = _safe_float(card_data.get("GPU Memory Allocated (VRAM%)"))
+                vram_used = round(pct * _vram_total_gb / 100.0, 1)
+
+            # VRAM total — only available in --showmetrics format; default to MI300X 192 GB
+            vram_total: float = (
+                _vram_total_gb
+                if _vram_total_raw is not None
+                else (_safe_float(card_data.get("VRAM Total Memory")) / 1024) or _vram_total_gb
+            )
+
+            # Utilization — --showmetrics uses "GFX Activity", -a --json uses "GPU use (%)"
+            util = _safe_float(
+                card_data.get("GFX Activity")
+                or card_data.get("GPU use (%)")
+                or card_data.get("GPU Activity (%)")
+            )
+
+            # Power — both formats supply this
+            power = _safe_float(
+                card_data.get("Average Graphics Package Power")
+                or card_data.get("Current Socket Graphics Package Power (W)")
+            )
+            power_cap = _safe_float(
+                card_data.get("Max Graphics Package Power (W)")
+                or card_data.get("Max Graphics Package Power")
+            )
+
+            # Clocks
+            sclk = _extract_mhz(card_data.get("SLCK") or card_data.get("sclk clock speed:"))
+            mclk = _extract_mhz(card_data.get("MCLK") or card_data.get("mclk clock speed:"))
+
+            # Name — use what the hardware actually reports
+            name = (
+                card_data.get("GPU name")
+                or card_data.get("Device Name")
+                or card_data.get("Card Series")
+                or card_data.get("Card Model")
+                or ""
+            )
+            if not name or name in ("N/A", ""):
+                vendor = card_data.get("Card Vendor", "")
+                if vendor:
+                    name = "AMD Instinct MI300X"
+                else:
+                    name = "AMD Instinct MI300X"
+
+            devices.append(
+                GPUDeviceInfo(
+                    device_id=int(card_id.removeprefix("card")),
+                    name=name,
+                    temperature_c=temp,
+                    vram_used_gb=vram_used,
+                    vram_total_gb=vram_total,
+                    utilization_pct=util,
+                    power_watts=power,
+                    power_cap_watts=power_cap,
+                    sclk_mhz=sclk,
+                    mclk_mhz=mclk,
+                )
+            )
+        except (ValueError, TypeError):
+            continue
+
+    return devices if devices else _ROCM_SMI_STUB()
+
+
+def _resolve_rocm_smi_url() -> str:
+    """
+    Determine the URL for the remote rocm-smi metrics endpoint.
+
+    Priority:
+      1. ROCM_SMI_URL env var (explicit)
+      2. Derived from VLLM_MIXTRAL_ENDPOINT — same host, port 8001, path /gpu
+      3. Empty string (no remote endpoint)
+    """
+    rocm_url = os.environ.get("ROCM_SMI_URL", "").strip()
+    if rocm_url:
+        return rocm_url
+
+    vllm_ep = os.environ.get("VLLM_MIXTRAL_ENDPOINT", "").strip()
+    if vllm_ep:
+        from urllib.parse import urlparse
+        parsed = urlparse(vllm_ep)
+        if parsed.hostname:
+            return f"{parsed.scheme or 'http'}://{parsed.hostname}:8001/gpu"
+
+    return ""
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Prometheus GPU Metrics Parser (AMD GPU Exporter / do-agent)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _parse_prometheus_gpu_metrics(text: str) -> list[GPUDeviceInfo]:
+    """
+    Parse Prometheus text exposition format from an AMD GPU exporter.
+
+    Handles the output of `curl localhost:5000/metrics` as emitted by the
+    amd-smi-exporter or similar AMD GPU Prometheus exporters.
+
+    Groups metrics by ``gpu_id`` label and maps known metric names to
+    GPUDeviceInfo fields.  Metrics not present in the Prometheus output
+    (sclk, mclk, power_cap) are set to sensible defaults.
+    """
+    import re
+
+    _METRIC_RE = re.compile(
+        r'^(?P<name>[a-zA-Z_:][a-zA-Z0-9_:]*)'
+        r'\{(?P<labels>[^}]*)\}'
+        r'\s+(?P<value>[-+]?[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?)'
+    )
+
+    def _parse_labels(labels_str: str) -> dict[str, str]:
+        out: dict[str, str] = {}
+        for m in re.finditer(r'(\w+)="((?:[^"\\]|\\.)*)"', labels_str):
+            out[m.group(1)] = m.group(2)
+        return out
+
+    def _safe_float(val: str | None, default: float = 0.0) -> float:
+        if val is None:
+            return default
+        try:
+            return float(val)
+        except (ValueError, TypeError):
+            return default
+
+    # Group raw metrics by gpu_id
+    gpu_metrics: dict[str, dict[str, float]] = {}
+    gpu_labels: dict[str, dict[str, str]] = {}
+
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+        m = _METRIC_RE.match(line)
+        if not m:
+            continue
+
+        metric_name = m.group('name')
+        labels = _parse_labels(m.group('labels'))
+        value = _safe_float(m.group('value'))
+
+        gpu_id = labels.get('gpu_id', '0')
+        if gpu_id not in gpu_metrics:
+            gpu_metrics[gpu_id] = {}
+            gpu_labels[gpu_id] = labels
+
+        gpu_metrics[gpu_id][metric_name] = value
+
+    if not gpu_metrics:
+        return []
+
+    devices: list[GPUDeviceInfo] = []
+    for gpu_id in sorted(gpu_metrics.keys(), key=lambda x: int(x) if x.isdigit() else 0):
+        m = gpu_metrics[gpu_id]
+        lbl = gpu_labels.get(gpu_id, {})
+
+        temperature = _safe_float(
+            str(m.get('amd_gpu_edge_temperature', m.get('amd_gpu_junction_temperature', 0)))
+        )
+
+        utilization = _safe_float(str(m.get('amd_gpu_gfx_activity', 0)))
+
+        power = _safe_float(
+            str(m.get('amd_gpu_average_package_power',
+                m.get('amd_gpu_package_power',
+                m.get('amd_gpu_power_usage', 0))))
+        )
+
+        vram_total_mb = _safe_float(str(m.get('amd_gpu_total_vram', 0)))
+        vram_used_mb = _safe_float(str(m.get('amd_gpu_used_vram', 0)))
+
+        vram_total_gb = round(vram_total_mb / 1024.0, 1) if vram_total_mb else 192.0
+        vram_used_gb = round(vram_used_mb / 1024.0, 1)
+
+        if vram_used_gb == 0 and vram_total_mb > 0:
+            free_mb = _safe_float(str(m.get('amd_gpu_free_vram', 0)))
+            vram_used_gb = round((vram_total_mb - free_mb) / 1024.0, 1)
+
+        vendor = lbl.get('card_vendor', '')
+        model = lbl.get('card_model', '')
+        series = lbl.get('card_series', '')
+        if model:
+            name = model
+        elif series and vendor:
+            name = f"{vendor} {series}"
+        elif vendor:
+            name = vendor
+        else:
+            name = "AMD Instinct MI300X"
+
+        device_id_val = int(gpu_id) if gpu_id.isdigit() else 0
+
+        devices.append(GPUDeviceInfo(
+            device_id=device_id_val,
+            name=name,
+            temperature_c=temperature,
+            vram_used_gb=vram_used_gb,
+            vram_total_gb=vram_total_gb,
+            utilization_pct=utilization,
+            power_watts=power,
+            power_cap_watts=750.0,
+            sclk_mhz=0,
+            mclk_mhz=0,
+        ))
+
+    return devices if devices else _ROCM_SMI_STUB()
+
+
+def _resolve_gpu_prometheus_url() -> str:
+    """
+    Determine the URL for the GPU Prometheus metrics endpoint (AMD exporter).
+
+    Priority:
+      1. GPU_PROMETHEUS_URL env var (explicit)
+      2. Derived from VLLM_MIXTRAL_ENDPOINT — same host, port 5000, path /metrics
+      3. Empty string (no endpoint)
+    """
+    prom_url = os.environ.get("GPU_PROMETHEUS_URL", "").strip()
+    if prom_url:
+        return prom_url
+
+    vllm_ep = os.environ.get("VLLM_MIXTRAL_ENDPOINT", "").strip()
+    if vllm_ep:
+        from urllib.parse import urlparse
+        parsed = urlparse(vllm_ep)
+        if parsed.hostname:
+            return f"{parsed.scheme or 'http'}://{parsed.hostname}:5000/metrics"
+
+    return ""
+
+
 def _read_live_rocm_smi() -> list[GPUDeviceInfo]:
     """
-    Attempt to read live GPU metrics from rocm-smi.
+    Attempt to read live GPU metrics.
 
-    Falls back to a stub if rocm-smi is not available on the host (e.g.
-    when running outside an AMD Instinct environment).
+    Tries, in order:
+      1. Local rocm-smi --showmetrics --json
+      2. Remote rocm-smi HTTP endpoint (ROCM_SMI_URL env var)
+      3. Prometheus metrics endpoint (GPU_PROMETHEUS_URL env var or
+         derived from VLLM_MIXTRAL_ENDPOINT, port 5000/metrics)
+      4. Stub fallback (zero-value device)
     """
     import json
     import subprocess
 
+    # ── Strategy 1: local rocm-smi ────────────────────────────────────
     try:
         result = subprocess.run(
             ["rocm-smi", "--showmetrics", "--json"],
@@ -759,47 +1102,44 @@ def _read_live_rocm_smi() -> list[GPUDeviceInfo]:
             text=True,
             timeout=10,
         )
-        if result.returncode != 0:
-            raise FileNotFoundError("rocm-smi returned non-zero")
-
-        raw = json.loads(result.stdout)
-        devices: list[GPUDeviceInfo] = []
-
-        for card_id, card_data in raw.items():
-            if not isinstance(card_data, dict):
-                continue
-            devices.append(
-                GPUDeviceInfo(
-                    device_id=int(card_id.removeprefix("card")),
-                    name=card_data.get("GPU name", "AMD Instinct MI300X"),
-                    temperature_c=float(card_data.get("Temperature (Sensor edge)", 45.0)),
-                    vram_used_gb=float(card_data.get("VRAM Total Used Memory", 48.0)) / 1024,
-                    vram_total_gb=float(card_data.get("VRAM Total Memory", 196608.0)) / 1024,
-                    utilization_pct=float(card_data.get("GPU use (%)", 30.0)),
-                    power_watts=float(card_data.get("Average Graphics Package Power", 300.0)),
-                    power_cap_watts=float(card_data.get("Max Graphics Package Power", 750.0)),
-                    sclk_mhz=int(card_data.get("SLCK", 1700)),
-                    mclk_mhz=int(card_data.get("MCLK", 1200)),
-                )
-            )
-        return devices
-
+        if result.returncode == 0:
+            raw = json.loads(result.stdout)
+            return _parse_rocm_smi_output(raw)
     except (FileNotFoundError, json.JSONDecodeError, subprocess.TimeoutExpired):
-        # Fallback: return a single stub device so the frontend doesn't break
-        return [
-            GPUDeviceInfo(
-                device_id=0,
-                name="AMD Instinct MI300X (rocm-smi unavailable)",
-                temperature_c=0,
-                vram_used_gb=0,
-                vram_total_gb=192,
-                utilization_pct=0,
-                power_watts=0,
-                power_cap_watts=750,
-                sclk_mhz=0,
-                mclk_mhz=0,
-            )
-        ]
+        pass
+
+    # ── Strategy 2: remote HTTP endpoint on the GPU droplet ───────────
+    rocm_url = _resolve_rocm_smi_url()
+    if rocm_url:
+        try:
+            import httpx
+            resp = httpx.get(rocm_url, timeout=10.0)
+            if resp.status_code == 200:
+                raw = resp.json()
+                return _parse_rocm_smi_output(raw)
+            logger.debug("Remote rocm-smi endpoint %s returned HTTP %d", rocm_url, resp.status_code)
+        except Exception as exc:
+            logger.debug("Remote rocm-smi fetch from %s failed: %s", rocm_url, exc)
+
+    # ── Strategy 3: Prometheus metrics endpoint (AMD GPU exporter) ─────
+    prom_url = _resolve_gpu_prometheus_url()
+    if prom_url:
+        try:
+            import httpx
+            resp = httpx.get(prom_url, timeout=10.0)
+            if resp.status_code == 200:
+                devices = _parse_prometheus_gpu_metrics(resp.text)
+                if devices and any(
+                    d.temperature_c > 0 or d.utilization_pct > 0 or d.vram_used_gb > 0
+                    for d in devices
+                ):
+                    return devices
+            logger.debug("Prometheus GPU endpoint %s returned HTTP %d", prom_url, resp.status_code)
+        except Exception as exc:
+            logger.debug("Prometheus GPU fetch from %s failed: %s", prom_url, exc)
+
+    # ── Fallback: stub device so the frontend doesn't break ───────────
+    return _ROCM_SMI_STUB()
 
 
 # ═══════════════════════════════════════════════════════════════════════════

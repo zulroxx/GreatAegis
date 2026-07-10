@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback } from "react";
 import type { InspectRequest, InspectResponse } from "../types/api";
 
-const API_BASE = "http://localhost:8060";
+const API_BASE = import.meta.env.VITE_API_BASE_URL;
 
 interface UseGatewayInspectResult {
   result: InspectResponse | null;

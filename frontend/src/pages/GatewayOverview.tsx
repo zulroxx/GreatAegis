@@ -7,7 +7,7 @@ import useHealthPolling from "../hooks/useHealthPolling";
 import { useState, useEffect } from "react";
 import type { ModelUsageResponse } from "../types/api";
 
-const API_BASE = "http://localhost:8060";
+const API_BASE = import.meta.env.VITE_API_BASE_URL;
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;

@@ -97,7 +97,6 @@ export default function ProxyChat() {
       } else {
         // REAL mode — hit the live backend gateway
         try {
-          const API_BASE = "http://localhost:8060";
           const quantumEncryption = getQuantumRule("Enforce Client-Side ML-KEM/Kyber Key Wrapping");
           const zeroTrust = getQuantumRule("Zero-Trust Data-in-Transit Payload Encapsulation");
           const podIsolation = getQuantumRule("Strict Safe-Compute Pod Isolation");
@@ -113,7 +112,7 @@ export default function ProxyChat() {
             }
           }
 
-          const res = await fetch(`${API_BASE}/api/v1/gateway/inspect`, {
+          const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/v1/gateway/inspect`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -165,8 +164,7 @@ export default function ProxyChat() {
       // Tell the backend to switch between simulated and production mode so
       // the AMD pod status reflects the real probe result (online/offline)
       // instead of staying stuck on "simulated".
-      const API_BASE = "http://localhost:8060";
-      fetch(`${API_BASE}/api/v1/gateway/mode?mode=${next ? "simulated" : "production"}`, {
+      fetch(`${import.meta.env.VITE_API_BASE_URL}/api/v1/gateway/mode?mode=${next ? "simulated" : "production"}`, {
         method: "POST",
       }).catch(() => {
         // Backend may be unreachable — non-critical, health poll will retry
