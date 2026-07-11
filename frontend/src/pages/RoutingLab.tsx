@@ -660,7 +660,7 @@ export default function RoutingLab() {
                         </tr>
                         <ConditionRow
                           label="→ verdict"
-                          value={result.verdict.replace(/_/g, " ")}
+                          value={result.verdict.replace(/_/g, " ").replace("qwen", "route")}
                           isFinal
                         />
                       </tbody>
@@ -683,7 +683,7 @@ export default function RoutingLab() {
                       }}
                     >
                       <Shield size={12} />
-                      {result.verdict.replace(/_/g, " ")}
+                      {result.verdict.replace(/_/g, " ").replace("qwen", "route")}
                     </span>
                     <span
                       className="text-xs font-mono"

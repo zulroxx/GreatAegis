@@ -44,13 +44,13 @@ export default function ProxyChat() {
       mode === "casual"
         ? "SIMULATE AMD POD CRASH"
         : mode === "sovereign"
-          ? "private_qwen_pod"
+          ? "private_route_pod"
           : "secure_fallback_tunnel";
 
     return {
       routing_verdict: verdict,
       target_compute_node: mode === "casual" ? "fireworks-ai-dedicated" : "amd-instinct-private-pod",
-      target_model: mode === "fallback" ? "Fireworks AI (Encrypted Tunnel Fallback)" : "Qwen3-0.6B",
+      target_model: mode === "fallback" ? "Fireworks AI (Encrypted Tunnel Fallback)" : "Private Route",
       routing_reason:
         mode === "fallback"
           ? "AMD Secure Pod offline — autonomous zero-trust failover to encrypted tunnel."

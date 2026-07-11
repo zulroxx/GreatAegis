@@ -29,7 +29,7 @@ Verdict = Literal[
     "secure_fallback",
 ]
 ModelName = Literal[
-    "qwen",
+    "private_route",
     "Fireworks AI (Encrypted Tunnel Fallback)",
     "accounts/fireworks/models/glm-5p2",
 ]
@@ -263,10 +263,10 @@ def route(
 
     # ── Step 2: route to private Qwen ─────────────────────────────────
     verdict: Verdict = "private_qwen"
-    target_model: ModelName = "qwen"
+    target_model: ModelName = "private_route"
     reason = (
         "Sensitive or complex inference task; "
-        "routed to AMD Instinct MI300X Pod running Qwen3-0.6B via vLLM "
+        "routed to AMD Secure Pod via vLLM "
         "with client-side ML-KEM encryption."
     )
 

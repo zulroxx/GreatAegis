@@ -350,7 +350,7 @@ export default function HardwareStatusBanner({
                   transition: "color 300ms",
                 }}
               >
-                {inspectResponse.routing_verdict}
+                {inspectResponse.routing_verdict.replace(/_/g, " ").replace("qwen", "route")}
               </span>
             </div>
           </>

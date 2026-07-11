@@ -109,11 +109,11 @@ SETTINGS_PASSWORD: str = os.environ.get("SETTINGS_PASSWORD", "")
 # ── vLLM endpoint map (used in production mode) ─────────────────────────────
 
 VLLM_ENDPOINTS: dict[str, str] = {
-    "qwen": os.environ.get("VLLM_ENDPOINT", ""),
+    "private_route": os.environ.get("VLLM_ENDPOINT", ""),
 }
 
 VLLM_MODEL_NAMES: dict[str, str] = {
-    "qwen": os.environ.get("VLLM_MODEL_NAME", "ThinkingCap"),
+    "private_route": os.environ.get("VLLM_MODEL_NAME", "ThinkingCap"),
 }
 
 # ── Production safety checks ──────────────────────────────────────────────────
@@ -133,7 +133,7 @@ if APP_MODE == "production":
     if SETTINGS_PASSWORD in ("", "root"):
         logger.error("FATAL: SETTINGS_PASSWORD is empty or using the default 'root'. Set a strong password for production.")
         sys.exit(1)
-    if not VLLM_ENDPOINTS.get("qwen"):
+    if not VLLM_ENDPOINTS.get("private_route"):
         logger.info("No VLLM endpoints configured — gateway will operate with Fireworks AI fallback only.")
         if not STORED_API_KEY:
             logger.error("FATAL: No VLLM endpoints configured and FIREWORKS_API_KEY is not set. Gateway has no available backend.")
@@ -662,7 +662,7 @@ async def inspect_prompt(request: Request, req: InspectRequest):
 
     elif verdict == "private_qwen":
         target_node = (
-            "AMD-Instinct-MI300X-Private-Pod (Qwen3-0.6B)"
+            "AMD-Secure-Pod (Private Route)"
         )
         encryption_status = "client-side ML-KEM wrapping"
 
@@ -1403,7 +1403,7 @@ def _simulate_private_response(model_name: str, prompt: str, temperature: float,
     import time
     import re
 
-    model_label = "Qwen3-0.6B (AMD Instinct)"
+    model_label = "Private Route (AMD Secure Pod)"
     header = (
         f"[Processed on {model_label} — private compute pod (simulated)]\n"
         "Your prompt was classified as sensitive and routed to the private AMD pod.\n"
@@ -1411,11 +1411,11 @@ def _simulate_private_response(model_name: str, prompt: str, temperature: float,
     )
 
     body = (
-        f"**Response (Qwen3-0.6B — simulated):**\n\n"
+        f"**Response (Private Route — simulated):**\n\n"
         f"Your prompt: *{prompt[:200]}{'...' if len(prompt) > 200 else ''}*\n\n"
-        f"This request has been processed through the simulated Qwen3-0.6B "
-        f"model on the AMD Instinct MI300X accelerator.\n\n"
-        f"In production mode this workload would leverage the full Qwen3-0.6B "
+        f"This request has been processed through the simulated private "
+        f"model on the AMD Secure Pod accelerator.\n\n"
+        f"In production mode this workload would leverage the full private "
         f"model for inference tasks such as compliance checking, code generation, "
         f"complex reasoning, and detailed analytical work.\n\n"
         f"All intermediate states remained encrypted and air-gapped within "
@@ -1498,7 +1498,7 @@ async def gateway_chat_stream(
         verdict, risk_score, model_name, reason, fallback_engaged = (
             "private_qwen",
             80,
-            "qwen",
+            "private_route",
             escalation_reason,
             False,
         )
@@ -1546,7 +1546,7 @@ async def gateway_chat_stream(
         target_node = "Fireworks AI (Public)"
     elif verdict == "private_qwen":
         encryption_status = "client-side ML-KEM wrapping"
-        target_node = "AMD-Instinct-MI300X-Private-Pod (Qwen3-0.6B)"
+        target_node = "AMD-Secure-Pod (Private Route)"
     else:  # secure_fallback
         encryption_status = "client-side ML-KEM wrapping (emergency fallback)"
         target_node = "Fireworks AI (Encrypted PQC Tunnel — Disaster Recovery)"

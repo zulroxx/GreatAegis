@@ -50,7 +50,7 @@ export type Verdict =
   | "secure_fallback";
 
 export type ModelName =
-  | "qwen"
+  | "private_route"
   | "Fireworks AI (Encrypted Tunnel Fallback)"
   | "accounts/fireworks/models/glm-5p2";
 
@@ -189,7 +189,7 @@ export function simulateRoute(
       verdict: "public_fireworks",
       modelName: "accounts/fireworks/models/glm-5p2",
       reason:
-        "Low-risk content; routed to public Fireworks endpoint via Qwen3-0.6B for cost efficiency.",
+        "Low-risk content; routed to public Fireworks endpoint for cost efficiency.",
       fallbackEngaged: false,
       workloadType: classifyWorkload(prompt),
       routingProfile,
@@ -213,16 +213,16 @@ export function simulateRoute(
 
   if (workload === "compliance") {
     verdict = "private_qwen";
-    modelName = "qwen";
+    modelName = "private_route";
     reason =
       "Lightweight compliance / policy verification task; " +
-      "routed to AMD Instinct Pod running Qwen3-0.6B via vLLM (compliance profile).";
+      "routed to AMD Secure Pod via vLLM (compliance profile).";
   } else {
     verdict = "private_qwen";
-    modelName = "qwen";
+    modelName = "private_route";
     reason =
       "Sensitive or complex inference task; " +
-      "routed to AMD Instinct MI300X Pod running Qwen3-0.6B via vLLM " +
+      "routed to AMD Secure Pod via vLLM " +
       "with client-side ML-KEM encryption (deep-inference profile).";
   }
 

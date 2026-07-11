@@ -611,7 +611,7 @@ export default function EnterpriseChatWorkspace() {
                     >
                       <Shield size={10} />
                       <span>
-                        {msg.routing.routing_verdict.replace(/_/g, " ")}
+                        {msg.routing.routing_verdict.replace(/_/g, " ").replace("qwen", "route")}
                         {msg.routing.fallback_engaged && " ⚠️ FALLBACK"}
                       </span>
                     </div>
