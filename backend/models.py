@@ -166,6 +166,7 @@ class GatewayChatRequest(BaseModel):
     prompt: str = Field(..., max_length=100_000)
     messages: list[ChatHistoryMessage] | None = None
     history_routing_verdicts: list[str] | None = None
+    conversation_id: str | None = None
     temperature: float = Field(default=0.3, ge=0.0, le=2.0)
     max_tokens: int = Field(default=2048, ge=1, le=8192)
     model: str | None = None
@@ -243,6 +244,7 @@ class SystemMetricsResponse(BaseModel):
 
 class ApiKeyRequest(BaseModel):
     api_key: str = Field(..., max_length=500)
+    settings_password: str | None = None
 
 
 class SettingsPasswordRequest(BaseModel):

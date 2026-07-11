@@ -114,19 +114,6 @@
     from { opacity: 0; transform: translateY(-8px); }
     to   { opacity: 1; transform: translateY(0); }
   }
-  @keyframes glowPulse {
-    0%, 100% { opacity: 0.6; filter: drop-shadow(0 0 4px var(--color-accent)); }
-    50%      { opacity: 1;   filter: drop-shadow(0 0 10px var(--color-accent)); }
-  }
-  @keyframes pathShimmer {
-    0%   { stroke-opacity: 0.3; }
-    50%  { stroke-opacity: 1;   }
-    100% { stroke-opacity: 0.3; }
-  }
-  @keyframes dataTrail {
-    0%   { opacity: 1; r: 3.5; }
-    100% { opacity: 0; r: 1;   }
-  }
   @keyframes statusBreathe {
     0%, 100% { transform: scale(1); opacity: 0.8; }
     50%      { transform: scale(1.3); opacity: 1; }
@@ -134,10 +121,6 @@
   @keyframes resultReveal {
     from { opacity: 0; clip-path: inset(0 0 100% 0); }
     to   { opacity: 1; clip-path: inset(0 0 0 0); }
-  }
-  @keyframes shimmer {
-    0%   { background-position: -200% 0; }
-    100% { background-position: 200% 0; }
   }
   @keyframes scaleBounce {
     0%   { transform: scale(0.92); opacity: 0; }
@@ -233,24 +216,17 @@
 /* ── Utility classes for animations ──────────────────────────── */
 .animate-slide-up   { animation: slideUpFadeIn 400ms ease-out both; }
 .animate-slide-down { animation: slideDownFadeIn 350ms ease-out both; }
-.animate-glow-pulse { animation: glowPulse 2s ease-in-out infinite; }
 .animate-reveal     { animation: resultReveal 500ms ease-out both; }
 .animate-bounce-in  { animation: scaleBounce 400ms ease-out both; }
 .animate-breathe    { animation: statusBreathe 2s ease-in-out infinite; }
 .animate-fade-scale { animation: fadeScale 350ms ease-out both; }
 .animate-slide-right { animation: slideRightFadeIn 300ms ease-out both; }
-.animate-spin-slow  { animation: spin 3s linear infinite; }
-
-/* ── Ordered stagger helper (applied via inline animationDelay) ── */
 
 /* ── Global focus-visible for keyboard accessibility ──────── */
 *:focus-visible {
-  /* outline: 2px solid #00E676; */
+  outline: 2px solid var(--color-accent);
   outline-offset: 2px;
   border-radius: 4px;
-}
-.light-theme *:focus-visible {
-  /* outline-color: #15803D;  Dark green for light backgrounds */
 }
 
 /* ── Smooth dark scrollbar ────────────────────────────────── */

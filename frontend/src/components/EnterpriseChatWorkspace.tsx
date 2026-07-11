@@ -53,6 +53,7 @@ async function streamGatewayChat(
   model?: string,
   historyMessages?: { role: string; content: string }[],
   historyRoutingVerdicts?: string[],
+  conversationId?: string,
 ) {
   try {
     // ── Client-side PQC: encrypt prompt before transit if ML-KEM is enabled ──
@@ -86,6 +87,7 @@ async function streamGatewayChat(
         zero_trust_enabled: zeroTrust,
         pod_isolation_enabled: podIsolation,
         encrypted_prompt: encryptedPrompt,
+        conversation_id: conversationId,
       }),
       signal,
     });
@@ -404,6 +406,7 @@ export default function EnterpriseChatWorkspace() {
       selectedModel,
       historyMessages,
       historyRoutingVerdicts,
+      activeConversationId,
     );
   }, [input, streaming, activeConversationId, conversations, createConversation, updateMessages]);
 

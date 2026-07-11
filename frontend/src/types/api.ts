@@ -1,5 +1,10 @@
 /* ── API Response Types ─────────────────────────────────────────────── */
 
+export type RoutingVerdict = "public_fireworks" | "private_route" | "secure_fallback";
+export type HardwareStatus = "online" | "offline" | "simulated";
+export type LogClassification = "Public" | "Confidential" | "Highly Confidential";
+export type RoutingProfile = "auto" | "compliance" | "deep-inference";
+
 export interface ChartDataPoint {
   timestamp: string;
   public_tokens: number;
@@ -18,14 +23,14 @@ export interface LogEntry {
   id: string;
   timestamp: string;
   file_name: string;
-  classification: string;
+  classification: LogClassification;
   file_size: number;
   ciphertext: string;
 }
 
 export interface InspectRequest {
   prompt_payload: string;
-  routing_profile?: string;
+  routing_profile?: RoutingProfile;
   client_encryption_flag?: boolean;
   quantum_encryption_enabled?: boolean;
   zero_trust_enabled?: boolean;
@@ -34,7 +39,7 @@ export interface InspectRequest {
 }
 
 export interface InspectResponse {
-  routing_verdict: string;
+  routing_verdict: RoutingVerdict;
   target_compute_node: string | null;
   target_model: string | null;
   routing_reason: string;
@@ -44,7 +49,7 @@ export interface InspectResponse {
   pqc_algorithm: string;
   pqc_public_key: string | null;
   streaming_endpoint: string | null;
-  hardware_status: "online" | "offline" | "simulated";
+  hardware_status: HardwareStatus;
   fallback_engaged: boolean;
 }
 
@@ -64,8 +69,8 @@ export interface GPUDeviceInfo {
 }
 
 export interface GPUTelemetryResponse {
-  mode: string;
-  hardware_status: "online" | "offline" | "simulated";
+  mode: "simulated" | "production";
+  hardware_status: HardwareStatus;
   timestamp: string;
   devices: GPUDeviceInfo[];
   hostname: string;
@@ -80,7 +85,7 @@ export interface ChatRequest {
   temperature?: number;
   max_tokens?: number;
   system_prompt?: string | null;
-  routing_profile?: string;
+  routing_profile?: RoutingProfile;
   client_encryption_flag?: boolean;
   quantum_encryption_enabled?: boolean;
   zero_trust_enabled?: boolean;
@@ -89,11 +94,11 @@ export interface ChatRequest {
 }
 
 export interface ChatRoutingInfo {
-  routing_verdict: string;
+  routing_verdict: RoutingVerdict;
   target_model: string;
   routing_reason: string;
   encryption_status: string;
-  hardware_status: string;
+  hardware_status: HardwareStatus;
   fallback_engaged: boolean;
   warning?: string | null;
   pqc_algorithm?: string;

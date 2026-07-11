@@ -32,5 +32,4 @@ build/
 Thumbs.db
 
 # Vector DB local storage
-.chroma_db/
 .qdrant_db/

@@ -116,6 +116,10 @@ VLLM_MODEL_NAMES: dict[str, str] = {
     "private_route": os.environ.get("VLLM_MODEL_NAME", "ThinkingCap"),
 }
 
+# ── Server-side API key storage (in-memory only, never persisted) ────────────
+
+STORED_API_KEY: str = os.environ.get("FIREWORKS_API_KEY", "")
+
 # ── Production safety checks ──────────────────────────────────────────────────
 
 if APP_MODE == "production":
@@ -139,16 +143,17 @@ if APP_MODE == "production":
             logger.error("FATAL: No VLLM endpoints configured and FIREWORKS_API_KEY is not set. Gateway has no available backend.")
             sys.exit(1)
 
-
-# ── Server-side API key storage (in-memory only, never persisted) ────────────
-
-STORED_API_KEY: str = os.environ.get("FIREWORKS_API_KEY", "")
-
 def _resolve_api_key(header_key: str) -> str:
     """Return header key if present, otherwise fall back to stored key."""
     return header_key or STORED_API_KEY
 
 AVAILABLE_MODELS = sorted(VLLM_ENDPOINTS.keys())
+
+# ── Server-side conversation tracking for privilege-escalation guard ──────────
+# Maps conversation_id → set of routing verdicts seen in that conversation.
+# Prevents a malicious client from omitting history_routing_verdicts to bypass
+# the privilege-escalation guard and leak sensitive context to public endpoints.
+_PRIVATE_CONVERSATION_IDS: set[str] = set()
 
 # ── Global hardware status (updated at startup + per-request) ───────────────
 
@@ -347,6 +352,17 @@ async def set_app_mode(request: Request, mode: str):
     mode_lower = mode.lower().strip()
     if mode_lower not in ("simulated", "production"):
         raise HTTPException(status_code=400, detail="mode must be 'simulated' or 'production'")
+
+    if mode_lower == "production":
+        _default_mlkem = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f"
+        _default_mldsa = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+        if os.environ.get("GREATAEGIS_MLKEM_SEED", "") == _default_mlkem:
+            raise HTTPException(status_code=400, detail="Cannot switch to production: GREATAEGIS_MLKEM_SEED is the default/dev seed")
+        if os.environ.get("GREATAEGIS_MLDSA_SEED", "") == _default_mldsa:
+            raise HTTPException(status_code=400, detail="Cannot switch to production: GREATAEGIS_MLDSA_SEED is the default/dev seed")
+        if SETTINGS_PASSWORD in ("", "root"):
+            raise HTTPException(status_code=400, detail="Cannot switch to production: SETTINGS_PASSWORD is empty or using the default 'root'")
+
     APP_MODE = mode_lower
     _refresh_hardware_status()
     logger.info("APP_MODE switched to '%s' at runtime", APP_MODE)
@@ -565,7 +581,8 @@ async def get_logs(request: Request):
 
 
 @app.delete("/api/v1/gateway/logs")
-async def clear_logs():
+@limiter.limit("10/minute")
+async def clear_logs(request: Request):
     _EVENT_LOG.clear()
     return {"cleared": True, "count": 0}
 
@@ -1179,13 +1196,21 @@ def _read_live_rocm_smi() -> list[GPUDeviceInfo]:
 # API Key Management (server-side, in-memory)
 # ═══════════════════════════════════════════════════════════════════════════
 
+def _require_settings_password(password: str) -> None:
+    """Raise 401 if SETTINGS_PASSWORD is configured and the password is wrong."""
+    import hmac
+    if SETTINGS_PASSWORD and not hmac.compare_digest(password or "", SETTINGS_PASSWORD):
+        raise HTTPException(status_code=401, detail="Invalid settings password")
+
+
 @app.post("/api/v1/gateway/verify-settings-password")
 @limiter.limit("5/minute")
 async def verify_settings_password(request: Request, req: SettingsPasswordRequest):
     """Verify the password for accessing the Settings page."""
     if not SETTINGS_PASSWORD:
         return {"granted": True}
-    return {"granted": req.password == SETTINGS_PASSWORD}
+    import hmac
+    return {"granted": hmac.compare_digest(req.password, SETTINGS_PASSWORD)}
 
 
 @app.post("/api/v1/gateway/test-key")
@@ -1195,6 +1220,7 @@ async def test_api_key(request: Request, req: ApiKeyRequest):
     Test whether a Fireworks API key is valid by calling the models list endpoint.
     Returns {valid: true} or {valid: false, detail: ...}.
     """
+    _require_settings_password(req.settings_password or "")
     import httpx
 
     if not req.api_key.strip():
@@ -1222,6 +1248,7 @@ async def test_api_key(request: Request, req: ApiKeyRequest):
 @limiter.limit("5/minute")
 async def save_api_key(request: Request, req: ApiKeyRequest):
     """Save the Fireworks API key server-side (in-memory only)."""
+    _require_settings_password(req.settings_password or "")
     global STORED_API_KEY
     key = req.api_key.strip()
     if not key:
@@ -1234,8 +1261,9 @@ async def save_api_key(request: Request, req: ApiKeyRequest):
 
 @app.delete("/api/v1/gateway/key")
 @limiter.limit("10/minute")
-async def delete_api_key(request: Request):
+async def delete_api_key(request: Request, password: str = ""):
     """Remove the stored Fireworks API key."""
+    _require_settings_password(password)
     global STORED_API_KEY
     STORED_API_KEY = ""
     logger.info("Fireworks API key removed from memory")
@@ -1365,6 +1393,7 @@ async def fireworks_chat_stream(
         yield {"event": "routing", "data": routing_info.model_dump_json()}
 
         accumulated = ""
+        real_usage: dict | None = None
 
         # Then stream tokens from Fireworks
         async for chunk in stream_chat_completion(
@@ -1379,18 +1408,18 @@ async def fireworks_chat_stream(
                 accumulated += chunk["content"]
                 yield {"event": "token", "data": chunk["content"]}
             elif chunk["type"] == "done":
+                real_usage = chunk.get("usage")
                 yield {"event": "done", "data": chunk.get("finish_reason", "stop")}
             elif chunk["type"] == "error":
                 yield {"event": "error", "data": chunk["detail"]}
                 return
 
-        # ── Estimate usage ──────────────────────────────────────────
-        from fireworks_client import track_estimated
-        track_estimated(
-            model=model_name,
-            prompt=req.prompt,
-            completion=accumulated,
-        )
+        # ── Track usage ────────────────────────────────────────────
+        from fireworks_client import _track_usage, estimate_tokens
+        if real_usage:
+            _track_usage(real_usage, model=model_name)
+        elif accumulated:
+            _track_usage(None, model=model_name, estimated_prompt=estimate_tokens(req.prompt), estimated_completion=estimate_tokens(accumulated))
 
     return EventSourceResponse(event_generator())
 
@@ -1399,7 +1428,7 @@ async def fireworks_chat_stream(
 # Gateway Chat (Autonomous Hybrid Router — model decided by the router)
 # ═══════════════════════════════════════════════════════════════════════════
 
-def _simulate_private_response(model_name: str, prompt: str, temperature: float, max_tokens: int):
+async def _simulate_private_response(model_name: str, prompt: str, temperature: float, max_tokens: int):
     """
     Generate a simulated streaming response for private AMD pod routes.
     Used in APP_MODE=simulated when the router decides private_route.
@@ -1408,7 +1437,7 @@ def _simulate_private_response(model_name: str, prompt: str, temperature: float,
     than a generic compliance assessment.  The output is intentionally
     labelled as simulated so the user knows no real AMD GPU served it.
     """
-    import time
+    import asyncio
     import re
 
     model_label = "Private Route (AMD Secure Pod)"
@@ -1434,11 +1463,9 @@ def _simulate_private_response(model_name: str, prompt: str, temperature: float,
 
     full_text = header + body
     tokens: list[str] = re.split(r"(\s+)", full_text)
-    i = 0
-    while i < len(tokens):
-        yield {"type": "token", "content": tokens[i]}
-        i += 1
-        time.sleep(0.002)  # fast simulated streaming
+    for token in tokens:
+        yield {"type": "token", "content": token}
+        await asyncio.sleep(0.002)
 
     yield {"type": "done", "finish_reason": "stop"}
 
@@ -1485,6 +1512,15 @@ async def gateway_chat_stream(
                 )
                 break
 
+    # Server-side guard: check if this conversation has already used a private route
+    if not force_private and req.conversation_id and req.conversation_id in _PRIVATE_CONVERSATION_IDS:
+        force_private = True
+        escalation_reason = (
+            "Privilege-escalation guard (server-side): this conversation previously "
+            "used a private endpoint. Keeping this request on the private AMD pod "
+            "to prevent context leakage."
+        )
+
     # ── 2. Run hybrid router ───────────────────────────────────────────
     _t0 = time.perf_counter()
     _refresh_hardware_status()
@@ -1500,7 +1536,12 @@ async def gateway_chat_stream(
             prompt_text = pqc_decrypt_payload(enc_data)
             logger.info("Client-side PQC prompt decrypted successfully (ML-KEM-768)")
         except Exception as exc:
-            logger.warning("Failed to decrypt client-side PQC prompt: %s", exc)
+            logger.error("Failed to decrypt client-side PQC prompt: %s", exc)
+            from fastapi.responses import JSONResponse
+            return JSONResponse(
+                status_code=400,
+                content={"error": "PQC_DECRYPTION_FAILED", "detail": str(exc)},
+            )
 
     if force_private:
         verdict, risk_score, model_name, reason, fallback_engaged = route(
@@ -1533,6 +1574,10 @@ async def gateway_chat_stream(
             pod_isolation_enabled=req.pod_isolation_enabled,
             encrypted_prompt_received=bool(req.encrypted_prompt),
         )
+    # ── Record server-side that this conversation used a private route ──
+    if req.conversation_id and verdict in ("private_route", "secure_fallback"):
+        _PRIVATE_CONVERSATION_IDS.add(req.conversation_id)
+
     _elapsed = (time.perf_counter() - _t0) * 1000  # ms
     _track_metrics(
         verdict, risk_score, _elapsed,
@@ -1620,10 +1665,13 @@ async def gateway_chat_stream(
         if warning:
             yield {"event": "warning", "data": warning}
 
-        if verdict == "public_fireworks":
+        real_usage: dict | None = None
+
+        if verdict in ("public_fireworks", "secure_fallback"):
             api_key = _resolve_api_key(x_api_key)
             if not api_key:
-                yield {"event": "error", "data": "Fireworks API key required for public route. Save in Settings."}
+                route_label = "public" if verdict == "public_fireworks" else "fallback"
+                yield {"event": "error", "data": f"Fireworks API key required for {route_label} route. Save in Settings."}
                 return
 
             async for chunk in stream_chat_completion(
@@ -1638,29 +1686,7 @@ async def gateway_chat_stream(
                     accumulated += chunk["content"]
                     yield {"event": "token", "data": chunk["content"]}
                 elif chunk["type"] == "done":
-                    yield {"event": "done", "data": chunk.get("finish_reason", "stop")}
-                elif chunk["type"] == "error":
-                    yield {"event": "error", "data": chunk["detail"]}
-                    return
-
-        elif verdict == "secure_fallback":
-            api_key = _resolve_api_key(x_api_key)
-            if not api_key:
-                yield {"event": "error", "data": "Fireworks API key required for fallback route. Save in Settings."}
-                return
-
-            async for chunk in stream_chat_completion(
-                api_key=api_key,
-                messages=messages,
-                model=model_name,
-                temperature=req.temperature,
-                max_tokens=req.max_tokens,
-                encrypt_in_transit=req.quantum_encryption_enabled,
-            ):
-                if chunk["type"] == "token":
-                    accumulated += chunk["content"]
-                    yield {"event": "token", "data": chunk["content"]}
-                elif chunk["type"] == "done":
+                    real_usage = chunk.get("usage")
                     yield {"event": "done", "data": chunk.get("finish_reason", "stop")}
                 elif chunk["type"] == "error":
                     yield {"event": "error", "data": chunk["detail"]}
@@ -1728,21 +1754,19 @@ async def gateway_chat_stream(
                     temperature=req.temperature,
                     max_tokens=req.max_tokens,
                 )
-                for chunk in gen:
+                async for chunk in gen:
                     if chunk["type"] == "token":
                         accumulated += chunk["content"]
                         yield {"event": "token", "data": chunk["content"]}
                     elif chunk["type"] == "done":
                         yield {"event": "done", "data": chunk.get("finish_reason", "stop")}
 
-        # ── Estimate usage for all routes ──────────────────────────
-        from fireworks_client import track_estimated
-        effective_model = model_name
-        track_estimated(
-            model=effective_model,
-            prompt=req.prompt,
-            completion=accumulated,
-        )
+        # ── Track usage (real API data when available, else estimate) ──
+        from fireworks_client import _track_usage, estimate_tokens
+        if real_usage:
+            _track_usage(real_usage, model=model_name)
+        elif accumulated:
+            _track_usage(None, model=model_name, estimated_prompt=estimate_tokens(req.prompt), estimated_completion=estimate_tokens(accumulated))
 
     return EventSourceResponse(event_generator())
 

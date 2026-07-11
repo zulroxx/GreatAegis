@@ -1140,8 +1140,8 @@ export default function SettingsPage() {
         <div className="space-y-1.5 text-xs" style={{ color: "var(--color-text-secondary)" }}>
           <p><span className="font-semibold" style={{ color: "var(--color-text-muted)" }}>Version:</span> GreatAegis AI Gateway v2.0.0</p>
           <p><span className="font-semibold" style={{ color: "var(--color-text-muted)" }}>Runtime:</span> AMD ROCm / Fireworks AI Hybrid Router</p>
-          <p><span className="font-semibold" style={{ color: "var(--color-text-muted)" }}>Cryptography:</span> ML-KEM-768 / SLH-DSA (FIPS 205)</p>
-          <p><span className="font-semibold" style={{ color: "var(--color-text-muted)" }}>Vector DB:</span> Local ChromaDB with AES-256-GCM encrypted chunks</p>
+           <p><span className="font-semibold" style={{ color: "var(--color-text-muted)" }}>Cryptography:</span> ML-KEM-768 / ML-DSA-65 (FIPS 204)</p>
+           <p><span className="font-semibold" style={{ color: "var(--color-text-muted)" }}>Vector DB:</span> Local Qdrant with AES-256-GCM encrypted chunks</p>
         </div>
       </div>
     </div>

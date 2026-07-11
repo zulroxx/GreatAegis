@@ -5,7 +5,7 @@ const POLL_INTERVAL = 5_000; // 5 seconds — aligned with other polling hooks
 
 export interface HealthData {
   hardware_status: "online" | "offline" | "simulated";
-  app_mode: string;
+  app_mode: "simulated" | "production";
   models_available: string[];
 }
 
