@@ -358,7 +358,7 @@ export default function EnterpriseChatWorkspace() {
     const latest = { current: newMessages };
 
     // Build history for context: previous user + assistant messages
-    const baseHistory = currentConv?.messages.slice(0, -1) ?? [];
+    const baseHistory = baseMessages;
     const historyMessages = baseHistory.map((m) => ({
       role: m.role,
       content: m.content,
