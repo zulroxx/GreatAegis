@@ -113,7 +113,7 @@ VLLM_ENDPOINTS: dict[str, str] = {
 }
 
 VLLM_MODEL_NAMES: dict[str, str] = {
-    "qwen": os.environ.get("VLLM_MODEL_NAME", "mistralai/Mixtral-8x7B-Instruct-v0.1"),
+    "qwen": os.environ.get("VLLM_MODEL_NAME", "ThinkingCap"),
 }
 
 # ── Production safety checks ──────────────────────────────────────────────────
