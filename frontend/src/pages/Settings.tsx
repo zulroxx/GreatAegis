@@ -86,6 +86,7 @@ const MODEL_OPTIONS: ModelOption[] = [
 
 const MODEL_STORAGE_KEY = "GREATAEGIS_FIREWORKS_MODEL";
 const SERVING_PATH_STORAGE_KEY = "GREATAEGIS_FIREWORKS_SERVING_PATH";
+const ROUTING_PROFILE_STORAGE_KEY = "GREATAEGIS_ROUTING_PROFILE";
 
 interface SettingRowProps {
   icon: React.ReactNode;
@@ -127,6 +128,13 @@ export default function SettingsPage() {
   const [saved, setSaved] = useState(false);
   const [selectedModelIdx, setSelectedModelIdx] = useState(0);
   const [selectedPath, setSelectedPath] = useState(MODEL_OPTIONS[0].paths[0].value);
+  const [routingProfile, setRoutingProfile] = useState<"auto" | "compliance" | "deep-inference">(() => {
+    try {
+      const stored = localStorage.getItem(ROUTING_PROFILE_STORAGE_KEY);
+      if (stored === "compliance" || stored === "deep-inference") return stored;
+    } catch { /* localStorage unavailable */ }
+    return "auto";
+  });
 
   const [fireworksKey, setFireworksKey] = useState("");
   const [keyConnected, setKeyConnected] = useState(false);
@@ -671,10 +679,16 @@ export default function SettingsPage() {
               color: "var(--color-text-primary)",
               border: "0px solid var(--color-border-default)",
             }}
+            value={routingProfile}
+            onChange={(e) => {
+              const val = e.target.value as "auto" | "compliance" | "deep-inference";
+              setRoutingProfile(val);
+              try { localStorage.setItem(ROUTING_PROFILE_STORAGE_KEY, val); } catch { /* localStorage unavailable */ }
+            }}
           >
-            <option value="default">Default (latency-optimized)</option>
-            <option value="sovereign">Sovereign (privacy-first)</option>
-            <option value="cost">Cost-optimized</option>
+            <option value="auto">Auto (classify from prompt)</option>
+            <option value="compliance">Compliance (privacy-first)</option>
+            <option value="deep-inference">Deep Inference (complex reasoning)</option>
           </select>
         </SettingRow>
       </div>

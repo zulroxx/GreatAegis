@@ -437,7 +437,7 @@ def _track_metrics(
 
     ``attacks_intercepted`` now counts requests where PQC encryption was
     actually applied to a sensitive prompt (risk >= 40), reflecting genuine
-    HNDL protection rather than a keyword-based keyword match.
+    HNDL protection rather than a keyword-based match.
     """
     now = datetime.now(timezone.utc)
     hour_key = now.strftime("%Y-%m-%dT%H")
@@ -631,7 +631,7 @@ async def inspect_prompt(request: Request, req: InspectRequest):
     )
     _append_log(
         "prompt_inspect",
-        classification="Highly Confidential" if verdict.startswith("private_") else "Public",
+        classification="Highly Confidential" if verdict.startswith("private_") or verdict == "secure_fallback" else "Public",
         file_name=prompt_snippet,
         file_size=len(prompt_payload),
         verdict=verdict,
@@ -679,6 +679,7 @@ async def inspect_prompt(request: Request, req: InspectRequest):
 
     else:
         # public_fireworks
+        target_node = "Fireworks AI (Public)"
         encryption_status = "plaintext (public route)"
 
     # ── ML-DSA-65 digital signature on the prompt payload ──────────────
@@ -924,11 +925,7 @@ def _parse_rocm_smi_output(raw: dict) -> list[GPUDeviceInfo]:
                 or ""
             )
             if not name or name in ("N/A", ""):
-                vendor = card_data.get("Card Vendor", "")
-                if vendor:
-                    name = "AMD Instinct MI300X"
-                else:
-                    name = "AMD Instinct MI300X"
+                name = "AMD Instinct MI300X"
 
             devices.append(
                 GPUDeviceInfo(
@@ -1327,23 +1324,23 @@ async def fireworks_chat_stream(
     prompt_snippet = req.prompt[:60] + ("..." if len(req.prompt) > 60 else "")
     _append_log(
         "fireworks_chat",
-        classification="Highly Confidential" if verdict.startswith("private_") else "Public",
+        classification="Highly Confidential" if verdict.startswith("private_") or verdict == "secure_fallback" else "Public",
         file_name=prompt_snippet,
         file_size=len(req.prompt),
         verdict=verdict,
-        model=str(req.model),
+        model=str(model_name),
     )
 
     encryption_status = "plaintext (public route)" if verdict == "public_fireworks" else "client-side ML-KEM wrapping"
     target_node = (
-        "AMD-Instinct-MI300X-Private-Pod" if "private" in verdict
-        else "Fireworks AI (Encrypted Tunnel Fallback)" if fallback_engaged
+        "AMD-Secure-Pod (Private Route)" if verdict == "private_route"
+        else "Fireworks AI (Encrypted PQC Tunnel — Disaster Recovery)" if fallback_engaged
         else "Fireworks AI (Public)"
     )
 
     routing_info = ChatResponse(
         routing_verdict=verdict,
-        target_model=req.model,
+        target_model=model_name,
         routing_reason=reason,
         encryption_status=encryption_status,
         hardware_status=HARDWARE_STATUS,
@@ -1367,22 +1364,33 @@ async def fireworks_chat_stream(
         # First event: routing info
         yield {"event": "routing", "data": routing_info.model_dump_json()}
 
+        accumulated = ""
+
         # Then stream tokens from Fireworks
         async for chunk in stream_chat_completion(
             api_key=api_key,
             messages=messages,
-            model=req.model,
+            model=model_name,
             temperature=req.temperature,
             max_tokens=req.max_tokens,
             encrypt_in_transit=req.quantum_encryption_enabled,
         ):
             if chunk["type"] == "token":
+                accumulated += chunk["content"]
                 yield {"event": "token", "data": chunk["content"]}
             elif chunk["type"] == "done":
                 yield {"event": "done", "data": chunk.get("finish_reason", "stop")}
             elif chunk["type"] == "error":
                 yield {"event": "error", "data": chunk["detail"]}
                 return
+
+        # ── Estimate usage ──────────────────────────────────────────
+        from fireworks_client import track_estimated
+        track_estimated(
+            model=model_name,
+            prompt=req.prompt,
+            completion=accumulated,
+        )
 
     return EventSourceResponse(event_generator())
 
@@ -1451,7 +1459,7 @@ async def gateway_chat_stream(
 
     Routing outcomes:
       public_fireworks  → Fireworks AI (GLM 5.2) — general prompts
-      private_route      → AMD Instinct pod (Qwen3-0.6B) — private inference
+      private_route      → AMD Secure Pod via vLLM — private inference
       secure_fallback   → Fireworks AI via encrypted PQC tunnel — disaster recovery
 
     SSE event types:
@@ -1495,13 +1503,24 @@ async def gateway_chat_stream(
             logger.warning("Failed to decrypt client-side PQC prompt: %s", exc)
 
     if force_private:
-        verdict, risk_score, model_name, reason, fallback_engaged = (
-            "private_route",
-            80,
-            "private_route",
-            escalation_reason,
-            False,
+        verdict, risk_score, model_name, reason, fallback_engaged = route(
+            prompt_text,
+            req.client_encryption_flag,
+            req.routing_profile,
+            vllm_endpoints=VLLM_ENDPOINTS if APP_MODE == "production" else None,
+            app_mode=APP_MODE,
+            quantum_encryption_enabled=req.quantum_encryption_enabled,
+            zero_trust_enabled=True,
+            pod_isolation_enabled=req.pod_isolation_enabled,
+            encrypted_prompt_received=bool(req.encrypted_prompt),
         )
+        if fallback_engaged:
+            reason = escalation_reason
+        else:
+            verdict = "private_route"
+            risk_score = max(risk_score, 80)
+            reason = escalation_reason
+            fallback_engaged = False
     else:
         verdict, risk_score, model_name, reason, fallback_engaged = route(
             prompt_text,
@@ -1557,11 +1576,12 @@ async def gateway_chat_stream(
         )
 
     if force_private:
-        warning = (
+        escalation_warning = (
             "🔒 Privilege-escalation guard active — this conversation previously "
             "used a private endpoint. All subsequent messages stay on the private "
             "AMD pod to prevent context leakage."
         )
+        warning = f"{escalation_warning} {warning}" if warning else escalation_warning
 
     routing_info = ChatResponse(
         routing_verdict=verdict,
@@ -1609,7 +1629,7 @@ async def gateway_chat_stream(
             async for chunk in stream_chat_completion(
                 api_key=api_key,
                 messages=messages,
-                model=req.model or model_name,
+                model=model_name,
                 temperature=req.temperature,
                 max_tokens=req.max_tokens,
                 encrypt_in_transit=req.quantum_encryption_enabled,
@@ -1632,7 +1652,7 @@ async def gateway_chat_stream(
             async for chunk in stream_chat_completion(
                 api_key=api_key,
                 messages=messages,
-                model=req.model or model_name,
+                model=model_name,
                 temperature=req.temperature,
                 max_tokens=req.max_tokens,
                 encrypt_in_transit=req.quantum_encryption_enabled,
@@ -1717,7 +1737,7 @@ async def gateway_chat_stream(
 
         # ── Estimate usage for all routes ──────────────────────────
         from fireworks_client import track_estimated
-        effective_model = model_name if verdict == "private_route" else (req.model or model_name)
+        effective_model = model_name
         track_estimated(
             model=effective_model,
             prompt=req.prompt,

@@ -3,14 +3,14 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 #
 # Purpose:  Run a locked vLLM inference server on AMD Instinct MI300X hardware
-#           serving GLM-5.2-FP8 behind the GreatAegis gateway.
+#           serving the configured model behind the GreatAegis gateway.
 #
 # Target:   linux/amd64  (AMD EPYC + Instinct MI300X, ROCm 6.x)
 # Runtime:  < 60 s container initialisation, < 30 s first-token latency
 #
 # Build:
 #   docker build -f Dockerfile.inference \
-#     --build-arg MODEL=GLM-5.2-FP8 \
+#     --build-arg MODEL=mistralai/Mixtral-8x7B-Instruct-v0.1 \
 #     --platform linux/amd64 \
 #     -t greataegis-inference:glm .
 #
@@ -105,6 +105,6 @@ CMD [ \
 # This produces an alternate model image from the same Dockerfile.
 
 FROM base AS alternate
-ARG MODEL=mistralai/Mixtral-8x7B-Instruct-v0.1
+ARG MODEL=zai-org/GLM-5.2-FP8
 ENV LOCKED_MODEL=${MODEL}
 LABEL org.greataegis.model="${LOCKED_MODEL}"

@@ -80,6 +80,7 @@ async function streamGatewayChat(
         temperature: 0.7,
         max_tokens: 2048,
         system_prompt: systemPrompt,
+        routing_profile: (() => { try { return localStorage.getItem("GREATAEGIS_ROUTING_PROFILE") || "auto"; } catch { return "auto"; } })(),
         client_encryption_flag: quantumEncryption,
         quantum_encryption_enabled: quantumEncryption,
         zero_trust_enabled: zeroTrust,
@@ -611,7 +612,7 @@ export default function EnterpriseChatWorkspace() {
                     >
                       <Shield size={10} />
                       <span>
-                        {msg.routing.routing_verdict.replace(/_/g, " ").replace("qwen", "route")}
+                        {msg.routing.routing_verdict.replace(/_/g, " ")}
                         {msg.routing.fallback_engaged && " ⚠️ FALLBACK"}
                       </span>
                     </div>

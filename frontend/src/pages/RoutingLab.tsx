@@ -27,8 +27,8 @@ const RULES = [
 
 const ROUTING_PROFILES: { value: RoutingProfile; label: string }[] = [
   { value: "auto", label: "Auto (classify from prompt)" },
-  { value: "compliance", label: "Compliance (force GLM compliance profile)" },
-  { value: "deep-inference", label: "Deep Inference (force GLM deep-inference profile)" },
+  { value: "compliance", label: "Compliance (force private route compliance profile)" },
+  { value: "deep-inference", label: "Deep Inference (force private route deep-inference profile)" },
 ];
 
 const EXAMPLE_PROMPT = "What is the Q4 financial forecast for the merger acquisition?";
@@ -660,7 +660,7 @@ export default function RoutingLab() {
                         </tr>
                         <ConditionRow
                           label="→ verdict"
-                          value={result.verdict.replace(/_/g, " ").replace("qwen", "route")}
+                          value={result.verdict.replace(/_/g, " ")}
                           isFinal
                         />
                       </tbody>
@@ -683,7 +683,7 @@ export default function RoutingLab() {
                       }}
                     >
                       <Shield size={12} />
-                      {result.verdict.replace(/_/g, " ").replace("qwen", "route")}
+                      {result.verdict.replace(/_/g, " ")}
                     </span>
                     <span
                       className="text-xs font-mono"

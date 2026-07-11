@@ -21,7 +21,7 @@ export const COMPLIANCE_KEYWORDS = [
   "compliance", "policy", "audit", "regulation", "gdpr",
   "soc2", "iso27001", "hipaa", "pci", "governance",
   "review", "summarise", "summarize", "classify", "check",
-  "validate", "verify", "moderate", "flag", "screening",
+  "verify", "moderate", "flag", "screening",
   "triage", "routing rule", "cost estimate", "quick",
   "lightweight", "simple query", "faq",
 ];
@@ -77,7 +77,7 @@ export interface RoutingResult {
   effectiveEncryption: boolean;
   scoreBelowThreshold: boolean;
   verdict: Verdict;
-  modelName: string;
+  modelName: ModelName;
   reason: string;
   fallbackEngaged: boolean;
   workloadType: WorkloadType;
@@ -123,7 +123,7 @@ export function classifyWorkload(prompt: string): WorkloadType {
   const complianceHits = keywordHits(lowered, COMPLIANCE_KEYWORDS);
   const deepHits = keywordHits(lowered, DEEP_INFERENCE_KEYWORDS);
 
-  if (deepHits >= 2 || (deepHits >= 1 && complianceHits === 0)) {
+  if (deepHits >= 2 || (deepHits >= 1 && deepHits >= complianceHits)) {
     return "deep-inference";
   }
   if (complianceHits >= 1) {

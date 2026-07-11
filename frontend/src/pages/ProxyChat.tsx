@@ -42,15 +42,15 @@ export default function ProxyChat() {
     const isConfidential = mode !== "casual";
     const verdict =
       mode === "casual"
-        ? "SIMULATE AMD POD CRASH"
+        ? "public_fireworks"
         : mode === "sovereign"
-          ? "private_route_pod"
-          : "secure_fallback_tunnel";
+          ? "private_route"
+          : "secure_fallback";
 
     return {
       routing_verdict: verdict,
       target_compute_node: mode === "casual" ? "fireworks-ai-dedicated" : "amd-instinct-private-pod",
-      target_model: mode === "fallback" ? "Fireworks AI (Encrypted Tunnel Fallback)" : "Private Route",
+      target_model: mode === "fallback" ? "Fireworks AI (Encrypted Tunnel Fallback)" : "private_route",
       routing_reason:
         mode === "fallback"
           ? "AMD Secure Pod offline — autonomous zero-trust failover to encrypted tunnel."
@@ -76,9 +76,10 @@ export default function ProxyChat() {
       setError(null);
       const lowered = prompt.toLowerCase();
       const hasSovereignKeyword = SOVEREIGN_KEYWORDS.some((kw) => lowered.includes(kw));
-      const mode = hasSovereignKeyword ? "sovereign" as const : "casual" as const;
+      const fallbackActive = demoMode === "fallback";
+      const mode = fallbackActive ? "fallback" as const : hasSovereignKeyword ? "sovereign" as const : "casual" as const;
       // Only update demoMode if user is in demo mode — don't override REAL toggle
-      if (isDemo) {
+      if (isDemo && !fallbackActive) {
         setDemoMode(mode);
       }
 
@@ -119,7 +120,7 @@ export default function ProxyChat() {
             body: JSON.stringify({
               prompt_payload: prompt,
               client_encryption_flag: quantumEncryption,
-              routing_profile: "default",
+              routing_profile: "auto",
               quantum_encryption_enabled: quantumEncryption,
               zero_trust_enabled: zeroTrust,
               pod_isolation_enabled: podIsolation,

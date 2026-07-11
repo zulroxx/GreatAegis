@@ -41,9 +41,7 @@ export default function HardwareStatusBanner({
     ? "offline"
     : !isDemoMode && !reachable
       ? "unreachable"
-      : isDemoMode
-        ? rawStatus
-        : rawStatus;
+      : rawStatus;
 
   const liveAppMode = health?.app_mode ?? null;
   const liveModels = health?.models_available ?? [];
@@ -350,7 +348,7 @@ export default function HardwareStatusBanner({
                   transition: "color 300ms",
                 }}
               >
-                {inspectResponse.routing_verdict.replace(/_/g, " ").replace("qwen", "route")}
+                {inspectResponse.routing_verdict.replace(/_/g, " ")}
               </span>
             </div>
           </>

@@ -4,7 +4,7 @@ hardware-aware fault tolerance.
 
 Two-tier routing architecture:
   1. PUBLIC     → Fireworks AI API via GLM 5.2 (safe, low-cost public endpoint)
-  2. PRIVATE    → AMD Instinct Pod via vLLM (Qwen/Qwen3-0.6B, private inference)
+  2. PRIVATE    → AMD Secure Pod via vLLM (private inference)
 
 When APP_MODE=production and the vLLM endpoint is unreachable, the router
 automatically engages SECURE_FALLBACK — emergency zero-trust routing via
@@ -47,7 +47,7 @@ _SENSITIVE_KEYWORDS = [
 ]
 
 # Keywords that indicate the prompt is a compliance / policy / lightweight
-# reasoning task → route to private Qwen (compliance profile).
+# reasoning task → route to private pod (compliance profile).
 _COMPLIANCE_KEYWORDS = [
     "compliance", "policy", "audit", "regulation", "gdpr",
     "soc2", "iso27001", "hipaa", "pci", "governance",
@@ -57,7 +57,7 @@ _COMPLIANCE_KEYWORDS = [
     "lightweight", "simple query", "faq",
 ]
 
-# Prompts that clearly need deep inference → Qwen (deep-inference profile)
+# Prompts that clearly need deep inference → private pod (deep-inference profile)
 _DEEP_INFERENCE_KEYWORDS = [
     "generate", "write", "draft", "compose", "create",
     "analyse", "analyze", "deep dive", "complex", "detailed",
@@ -169,6 +169,9 @@ def _probe_vllm_health_uncached(health_url: str, timeout: float) -> bool:
     except requests.exceptions.Timeout:
         logger.warning("vLLM health probe: timeout after %.1fs — %s", timeout, health_url)
         return False
+    except requests.exceptions.RequestException as exc:
+        logger.warning("vLLM health probe: request error — %s (%s)", health_url, exc)
+        return False
 
 
 def probe_all_vllm_endpoints(
@@ -261,14 +264,27 @@ def route(
             False,
         )
 
-    # ── Step 2: route to private Qwen ─────────────────────────────────
+    # ── Step 2: route to private pod ─────────────────────────────────
     verdict: Verdict = "private_route"
     target_model: ModelName = "private_route"
-    reason = (
-        "Sensitive or complex inference task; "
-        "routed to AMD Secure Pod via vLLM "
-        "with client-side ML-KEM encryption."
-    )
+
+    workload = _classify_workload(prompt_payload)
+    if routing_profile == "compliance":
+        workload = "compliance"
+    elif routing_profile == "deep-inference":
+        workload = "deep-inference"
+
+    if workload == "compliance":
+        reason = (
+            "Lightweight compliance / policy verification task; "
+            "routed to AMD Secure Pod via vLLM (compliance profile)."
+        )
+    else:
+        reason = (
+            "Sensitive or complex inference task; "
+            "routed to AMD Secure Pod via vLLM "
+            "with client-side ML-KEM encryption."
+        )
 
     # ── Step 3: hardware health check (production only) ────────────────
     if app_mode == "production" and vllm_endpoints:
@@ -281,29 +297,21 @@ def route(
                 endpoint,
             )
 
-            if pod_isolation_enabled:
-                # Pod isolation is ON but the AMD Pod is not ready.  We still
-                # fall back to Fireworks AI via encrypted tunnel so the user
-                # gets a response, but flag that pod isolation policy was
-                # relaxed for this request.
-                return (
-                    "secure_fallback",
-                    max(score, 80),
-                    "Fireworks AI (Encrypted Tunnel Fallback)",
-                    "AMD Private Pod is not ready. Sensitive content was routed "
-                    "through an encrypted PQC tunnel to Fireworks AI. Pod isolation "
-                    "policy was bypassed for emergency continuity — restore AMD pod "
-                    "connectivity to resume private processing.",
-                    True,
-                )
-
+            fallback_reason = (
+                "AMD Private Pod is not ready. Sensitive content was routed "
+                "through an encrypted PQC tunnel to Fireworks AI. Pod isolation "
+                "policy was bypassed for emergency continuity — restore AMD pod "
+                "connectivity to resume private processing."
+                if pod_isolation_enabled
+                else "AMD Private Pod is not ready. Sensitive content was routed "
+                "through an encrypted PQC tunnel to Fireworks AI as a zero-trust "
+                "fallback. Data remains protected via client-side ML-KEM wrapping."
+            )
             return (
                 "secure_fallback",
-                max(score, 80),  # floor at 80 to reflect elevated risk
+                max(score, 80),
                 "Fireworks AI (Encrypted Tunnel Fallback)",
-                "AMD Private Pod is not ready. Sensitive content was routed "
-                "through an encrypted PQC tunnel to Fireworks AI as a zero-trust "
-                "fallback. Data remains protected via client-side ML-KEM wrapping.",
+                fallback_reason,
                 True,
             )
 

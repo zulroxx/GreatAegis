@@ -1,4 +1,3 @@
-version: '3.8'
 
 services:
   frontend:
@@ -22,7 +21,6 @@ services:
       - "8060:8060"
     environment:
       - FIREWORKS_API_KEY=${FIREWORKS_API_KEY}
-      - LOCAL_AMD_URL=${LOCAL_AMD_URL:-http://localhost:8080}
       - GPU_PROMETHEUS_URL=${GPU_PROMETHEUS_URL:-}
       - ROCM_SMI_URL=${ROCM_SMI_URL:-}
     env_file:

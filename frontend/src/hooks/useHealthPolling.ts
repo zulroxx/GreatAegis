@@ -34,8 +34,8 @@ export default function useHealthPolling(): UseHealthPollingResult {
         const json = await res.json();
         if (mounted.current) {
           setHealth({
-            hardware_status: json.hardware_status,
-            app_mode: json.app_mode,
+            hardware_status: json.hardware_status ?? "simulated",
+            app_mode: json.app_mode ?? "simulated",
             models_available: json.models_available ?? [],
           });
           setReachable(true);
