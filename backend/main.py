@@ -1574,6 +1574,12 @@ async def gateway_chat_stream(
             pod_isolation_enabled=req.pod_isolation_enabled,
             encrypted_prompt_received=bool(req.encrypted_prompt),
         )
+
+    # ── Respect user-selected model for public/fallback routes ─────────
+    if verdict in ("public_fireworks", "secure_fallback") and req.model:
+        model_name = req.model
+        reason = f"User-selected model: {req.model}. {reason}"
+
     # ── Record server-side that this conversation used a private route ──
     if req.conversation_id and verdict in ("private_route", "secure_fallback"):
         _PRIVATE_CONVERSATION_IDS.add(req.conversation_id)
