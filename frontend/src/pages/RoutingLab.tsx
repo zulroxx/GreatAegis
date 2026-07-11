@@ -51,7 +51,7 @@ function getVerdictColor(verdict: string): { bg: string; border: string; text: s
   switch (verdict) {
     case "public_fireworks":
       return { bg: "var(--color-success-dim)", border: "color-mix(in srgb, var(--color-success) 30%, transparent)", text: "var(--color-success)" };
-    case "private_qwen":
+    case "private_route":
       return { bg: "rgba(0, 230, 118, 0.08)", border: "color-mix(in srgb, var(--color-accent) 30%, transparent)", text: "var(--color-accent)" };
     case "secure_fallback":
       return { bg: "rgba(243, 128, 32, 0.1)", border: "rgba(243, 128, 32, 0.3)", text: "var(--color-warning)" };

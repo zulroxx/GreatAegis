@@ -46,7 +46,7 @@ function keywordHits(text: string, keywords: string[]): number {
 
 export type Verdict =
   | "public_fireworks"
-  | "private_qwen"
+  | "private_route"
   | "secure_fallback";
 
 export type ModelName =
@@ -212,13 +212,13 @@ export function simulateRoute(
   let reason: string;
 
   if (workload === "compliance") {
-    verdict = "private_qwen";
+    verdict = "private_route";
     modelName = "private_route";
     reason =
       "Lightweight compliance / policy verification task; " +
       "routed to AMD Secure Pod via vLLM (compliance profile).";
   } else {
-    verdict = "private_qwen";
+    verdict = "private_route";
     modelName = "private_route";
     reason =
       "Sensitive or complex inference task; " +

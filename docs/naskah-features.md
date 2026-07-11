@@ -30,10 +30,10 @@
 > - **Matched Keywords** — kata-kata sensitif yang terdeteksi, misalnya "forecast", "merger", "acquisition", masing-masing dengan badge merah.
 > - **Workload Classification** — apakah prompt ini termasuk *Compliance*, *Deep Inference*, atau *General*.
 > - **Condition Evaluation Table** — tabel evaluasi kondisi seperti `force_private`, `score < 40`, `effective_encryption`. Setiap baris menunjukkan apakah kondisi terpenuhi (centang hijau) atau tidak (silang merah).
-> - **Final Verdict** — keputusan akhir: **public_fireworks** (rute publik), **private_qwen** (pod AMD privat), atau **secure_fallback** (tunnel terenkripsi jika pod offline).
+> - **Final Verdict** — keputusan akhir: **public_fireworks** (rute publik), **private_route** (pod AMD privat), atau **secure_fallback** (tunnel terenkripsi jika pod offline).
 > - **Routing Reason** — penjelasan tekstual mengapa router mengambil keputusan tersebut.
 >
-> **Visual:** Tunjukkan saat prompt sensitif mendapat verdict "private_qwen", lalu nonaktifkan aturan pod isolation dan tunjukkan verdict berubah menjadi "secure_fallback".
+> **Visual:** Tunjukkan saat prompt sensitif mendapat verdict "private_route", lalu nonaktifkan aturan pod isolation dan tunjukkan verdict berubah menjadi "secure_fallback".
 >
 > Ini alat yang sangat berguna untuk memahami dan menguji kebijakan routing sebelum deployment ke produksi.
 
@@ -98,7 +98,7 @@
 > 4. Dilakukan semantic search di atas **vector store terenkripsi** — chunk yang relevan didekripsi hanya di dalam pod aman.
 > 5. LLM menghasilkan jawaban yang **dikutip** dari chunk dokumen asli.
 >
-> **Visual:** Tunjukkan badge routing pada pesan asisten — misalnya "Routed: private_qwen | ML-KEM-768 | 3 rules applied".
+> **Visual:** Tunjukkan badge routing pada pesan asisten — misalnya "Routed: private_route | ML-KEM-768 | 3 rules applied".
 >
 > Hasilnya adalah **jawaban yang kontekstual dan terverifikasi**, lengkap dengan badge routing yang menunjukkan:
 > - **Verdict** (rute yang dipilih)

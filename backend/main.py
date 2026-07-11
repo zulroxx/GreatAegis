@@ -660,7 +660,7 @@ async def inspect_prompt(request: Request, req: InspectRequest):
             pqc_sig = "emergency-pqc-tunnel-recommended"
             pqc_valid = False
 
-    elif verdict == "private_qwen":
+    elif verdict == "private_route":
         target_node = (
             "AMD-Secure-Pod (Private Route)"
         )
@@ -1394,7 +1394,7 @@ async def fireworks_chat_stream(
 def _simulate_private_response(model_name: str, prompt: str, temperature: float, max_tokens: int):
     """
     Generate a simulated streaming response for private AMD pod routes.
-    Used in APP_MODE=simulated when the router decides private_qwen.
+    Used in APP_MODE=simulated when the router decides private_route.
 
     Produces a context-aware response based on the actual prompt rather
     than a generic compliance assessment.  The output is intentionally
@@ -1451,7 +1451,7 @@ async def gateway_chat_stream(
 
     Routing outcomes:
       public_fireworks  → Fireworks AI (GLM 5.2) — general prompts
-      private_qwen      → AMD Instinct pod (Qwen3-0.6B) — private inference
+      private_route      → AMD Instinct pod (Qwen3-0.6B) — private inference
       secure_fallback   → Fireworks AI via encrypted PQC tunnel — disaster recovery
 
     SSE event types:
@@ -1468,7 +1468,7 @@ async def gateway_chat_stream(
     escalation_reason: str | None = None
     if req.history_routing_verdicts:
         for old_verdict in req.history_routing_verdicts:
-            if old_verdict in ("private_qwen", "secure_fallback"):
+            if old_verdict in ("private_route", "secure_fallback"):
                 force_private = True
                 escalation_reason = (
                     "Privilege-escalation guard: previous messages were processed "
@@ -1496,7 +1496,7 @@ async def gateway_chat_stream(
 
     if force_private:
         verdict, risk_score, model_name, reason, fallback_engaged = (
-            "private_qwen",
+            "private_route",
             80,
             "private_route",
             escalation_reason,
@@ -1544,7 +1544,7 @@ async def gateway_chat_stream(
     if verdict == "public_fireworks":
         encryption_status = "plaintext (public route)"
         target_node = "Fireworks AI (Public)"
-    elif verdict == "private_qwen":
+    elif verdict == "private_route":
         encryption_status = "client-side ML-KEM wrapping"
         target_node = "AMD-Secure-Pod (Private Route)"
     else:  # secure_fallback
@@ -1647,7 +1647,7 @@ async def gateway_chat_stream(
                     return
 
         else:
-            # Private AMD pod route (private_qwen)
+            # Private AMD pod route (private_route)
             vllm_endpoint = VLLM_ENDPOINTS.get(model_name, "")
             vllm_ok = False
 
@@ -1717,7 +1717,7 @@ async def gateway_chat_stream(
 
         # ── Estimate usage for all routes ──────────────────────────
         from fireworks_client import track_estimated
-        effective_model = req.model or model_name
+        effective_model = model_name if verdict == "private_route" else (req.model or model_name)
         track_estimated(
             model=effective_model,
             prompt=req.prompt,

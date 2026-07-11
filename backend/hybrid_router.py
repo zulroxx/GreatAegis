@@ -25,7 +25,7 @@ logger = logging.getLogger("great_aegis.hybrid_router")
 
 Verdict = Literal[
     "public_fireworks",
-    "private_qwen",
+    "private_route",
     "secure_fallback",
 ]
 ModelName = Literal[
@@ -262,7 +262,7 @@ def route(
         )
 
     # ── Step 2: route to private Qwen ─────────────────────────────────
-    verdict: Verdict = "private_qwen"
+    verdict: Verdict = "private_route"
     target_model: ModelName = "private_route"
     reason = (
         "Sensitive or complex inference task; "

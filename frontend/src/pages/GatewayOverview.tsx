@@ -253,7 +253,8 @@ export default function GatewayOverview() {
               </div>
 
               {modelUsage && modelUsage.models.length > 0 ? (
-                <table className="w-full text-xs">
+                <div className="overflow-x-auto">
+                <table className="w-full text-xs" style={{ minWidth: "640px" }}>
                   <thead>
                     <tr style={{ borderBottom: "0px solid var(--color-border-default)" }}>
                       <th className="text-left font-medium px-4 py-2.5" style={{ color: "var(--color-text-muted)" }}>Model</th>
@@ -315,6 +316,7 @@ export default function GatewayOverview() {
                     </tr>
                   </tbody>
                 </table>
+                </div>
               ) : (
                 <div className="px-5 py-8 text-center">
                   <Database size={28} className="mx-auto mb-2" style={{ color: "var(--color-text-muted)" }} />
