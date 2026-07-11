@@ -8,7 +8,7 @@ The migration of the original Next.js application to a Vite-based React frontend
 - Replaced the old v1.0 monolithic backend with a clean FastAPI (v2.0) architecture
 - Configured modular routers (`api_health`, `api_proxy`, `api_fireworks`)
 - Implemented actual integrations with the Fireworks AI SDK
-- Replaced stubbed local database logic with a real ChromaDB implementation for vector embeddings
+- Replaced stubbed local database logic with a real Qdrant implementation for vector embeddings
 
 ### 2. Frontend Modernization
 - Completely migrated the frontend from Next.js (app router) to a Vite + React Single Page Application (SPA) architecture, retaining folder structures as requested
