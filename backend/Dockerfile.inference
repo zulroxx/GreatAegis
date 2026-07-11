@@ -26,8 +26,8 @@
 FROM rocm/vllm:rocm6.2_mi300_ubuntu22.04_py3.10_vllm_0.6.4 AS base
 
 # ── Build arguments ─────────────────────────────────────────────────────────
-#   MODEL: "bottlecapai/ThinkingCap-Qwen3.6-27B"
-ARG MODEL=bottlecapai/ThinkingCap-Qwen3.6-27B
+#   MODEL: "mistralai/Mixtral-8x7B-Instruct-v0.1"
+ARG MODEL=mistralai/Mixtral-8x7B-Instruct-v0.1
 ENV LOCKED_MODEL=${MODEL}
 
 # ── Metadata labels ─────────────────────────────────────────────────────────
@@ -105,6 +105,6 @@ CMD [ \
 # This produces an alternate model image from the same Dockerfile.
 
 FROM base AS alternate
-ARG MODEL=bottlecapai/ThinkingCap-Qwen3.6-27B
+ARG MODEL=mistralai/Mixtral-8x7B-Instruct-v0.1
 ENV LOCKED_MODEL=${MODEL}
 LABEL org.greataegis.model="${LOCKED_MODEL}"
