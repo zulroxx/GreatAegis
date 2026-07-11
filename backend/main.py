@@ -1460,7 +1460,24 @@ async def gateway_chat_stream(
       event: done       → {finish_reason: "stop"}
       event: error      → {detail: "..."}
     """
-    # ── 1. Run hybrid router ───────────────────────────────────────────
+    # ── 1. Privilege-escalation guard ──────────────────────────────────
+    # If any prior message in this conversation was routed to a private
+    # endpoint, force all subsequent requests to stay on the private pod.
+    # This prevents accidental leakage of sensitive context to public AI.
+    force_private = False
+    escalation_reason: str | None = None
+    if req.history_routing_verdicts:
+        for old_verdict in req.history_routing_verdicts:
+            if old_verdict in ("private_qwen", "secure_fallback"):
+                force_private = True
+                escalation_reason = (
+                    "Privilege-escalation guard: previous messages were processed "
+                    f"on a private endpoint ({old_verdict}). Keeping this request "
+                    "on the private AMD pod to prevent context leakage."
+                )
+                break
+
+    # ── 2. Run hybrid router ───────────────────────────────────────────
     _t0 = time.perf_counter()
     _refresh_hardware_status()
 
@@ -1477,17 +1494,26 @@ async def gateway_chat_stream(
         except Exception as exc:
             logger.warning("Failed to decrypt client-side PQC prompt: %s", exc)
 
-    verdict, risk_score, model_name, reason, fallback_engaged = route(
-        prompt_text,
-        req.client_encryption_flag,
-        req.routing_profile,
-        vllm_endpoints=VLLM_ENDPOINTS if APP_MODE == "production" else None,
-        app_mode=APP_MODE,
-        quantum_encryption_enabled=req.quantum_encryption_enabled,
-        zero_trust_enabled=req.zero_trust_enabled,
-        pod_isolation_enabled=req.pod_isolation_enabled,
-        encrypted_prompt_received=bool(req.encrypted_prompt),
-    )
+    if force_private:
+        verdict, risk_score, model_name, reason, fallback_engaged = (
+            "private_qwen",
+            80,
+            "qwen",
+            escalation_reason,
+            False,
+        )
+    else:
+        verdict, risk_score, model_name, reason, fallback_engaged = route(
+            prompt_text,
+            req.client_encryption_flag,
+            req.routing_profile,
+            vllm_endpoints=VLLM_ENDPOINTS if APP_MODE == "production" else None,
+            app_mode=APP_MODE,
+            quantum_encryption_enabled=req.quantum_encryption_enabled,
+            zero_trust_enabled=req.zero_trust_enabled,
+            pod_isolation_enabled=req.pod_isolation_enabled,
+            encrypted_prompt_received=bool(req.encrypted_prompt),
+        )
     _elapsed = (time.perf_counter() - _t0) * 1000  # ms
     _track_metrics(
         verdict, risk_score, _elapsed,
@@ -1510,9 +1536,10 @@ async def gateway_chat_stream(
         encryption=str(req.quantum_encryption_enabled),
         zt=str(req.zero_trust_enabled),
         pqc_encrypted=str(bool(req.encrypted_prompt)),
+        force_private=str(force_private),
     )
 
-    # ── 2. Build routing info ──────────────────────────────────────────
+    # ── 3. Build routing info ──────────────────────────────────────────
     warning: str | None = None
     if verdict == "public_fireworks":
         encryption_status = "plaintext (public route)"
@@ -1527,6 +1554,13 @@ async def gateway_chat_stream(
             "⚠️ AMD Secure Pod is not ready. Sensitive content was routed through "
             "an encrypted PQC tunnel to Fireworks AI. Responses are generated on "
             "the public endpoint with zero-trust encryption in transit."
+        )
+
+    if force_private:
+        warning = (
+            "🔒 Privilege-escalation guard active — this conversation previously "
+            "used a private endpoint. All subsequent messages stay on the private "
+            "AMD pod to prevent context leakage."
         )
 
     routing_info = ChatResponse(
@@ -1545,12 +1579,15 @@ async def gateway_chat_stream(
         warning=warning,
     )
 
-    # ── 3. Build messages for AI call ──────────────────────────────────
+    # ── 4. Build messages for AI call ──────────────────────────────────
     from fireworks_client import stream_chat_completion
 
     messages: list[dict] = []
     if req.system_prompt:
         messages.append({"role": "system", "content": req.system_prompt})
+    if req.messages:
+        for msg in req.messages:
+            messages.append({"role": msg.role, "content": msg.content})
     messages.append({"role": "user", "content": prompt_text})
 
     # ── 4. Stream response based on verdict ────────────────────────────

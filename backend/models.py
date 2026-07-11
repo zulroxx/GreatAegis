@@ -156,9 +156,16 @@ class ChatRequest(BaseModel):
 
 # ── Gateway Chat (autonomous hybrid router decides model) ───────────────────
 
+class ChatHistoryMessage(BaseModel):
+    role: str = Field(..., pattern="^(user|assistant|system)$")
+    content: str = Field(..., max_length=100_000)
+
+
 class GatewayChatRequest(BaseModel):
     """Chat request that goes through the hybrid router."""
     prompt: str = Field(..., max_length=100_000)
+    messages: list[ChatHistoryMessage] | None = None
+    history_routing_verdicts: list[str] | None = None
     temperature: float = Field(default=0.3, ge=0.0, le=2.0)
     max_tokens: int = Field(default=2048, ge=1, le=8192)
     model: str | None = None

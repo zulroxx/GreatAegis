@@ -51,6 +51,8 @@ async function streamGatewayChat(
   onWarning?: (warning: string) => void,
   systemPrompt?: string,
   model?: string,
+  historyMessages?: { role: string; content: string }[],
+  historyRoutingVerdicts?: string[],
 ) {
   try {
     // ── Client-side PQC: encrypt prompt before transit if ML-KEM is enabled ──
@@ -72,6 +74,8 @@ async function streamGatewayChat(
       },
       body: JSON.stringify({
         prompt,
+        messages: historyMessages,
+        history_routing_verdicts: historyRoutingVerdicts,
         model,
         temperature: 0.7,
         max_tokens: 2048,
@@ -353,6 +357,16 @@ export default function EnterpriseChatWorkspace() {
     let fullContent = "";
     const latest = { current: newMessages };
 
+    // Build history for context: previous user + assistant messages
+    const baseHistory = currentConv?.messages.slice(0, -1) ?? [];
+    const historyMessages = baseHistory.map((m) => ({
+      role: m.role,
+      content: m.content,
+    }));
+    const historyRoutingVerdicts = baseHistory
+      .filter((m) => m.role === "assistant" && m.routing?.routing_verdict)
+      .map((m) => m.routing!.routing_verdict);
+
     await streamGatewayChat(
       fullPrompt,
       (routing) => {
@@ -387,6 +401,8 @@ export default function EnterpriseChatWorkspace() {
         ? "The user's message contains document text labeled 'Document text:'. It is NOT a file attachment — the actual text has already been extracted and is included directly in the message. Read it and answer the user's question about it."
         : undefined,
       selectedModel,
+      historyMessages,
+      historyRoutingVerdicts,
     );
   }, [input, streaming, activeConversationId, conversations, createConversation, updateMessages]);
 
