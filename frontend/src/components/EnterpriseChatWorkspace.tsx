@@ -108,6 +108,55 @@ async function streamGatewayChat(
     const decoder = new TextDecoder();
     let buffer = "";
     let currentEvent = "";
+    let dataLines: string[] = [];
+    let stopProcessing = false;
+
+    const flushEvent = () => {
+      if (dataLines.length === 0) return;
+      const dataStr = dataLines.join("\n");
+
+      switch (currentEvent) {
+        case "routing": {
+          try {
+            const parsed = JSON.parse(dataStr);
+            onRouting(parsed as ChatRoutingInfo);
+          } catch {
+            // ignore malformed routing
+          }
+          break;
+        }
+        case "token":
+          onToken(dataStr || "\n");
+          break;
+        case "done":
+          onDone();
+          break;
+        case "warning":
+          if (onWarning) onWarning(dataStr);
+          break;
+        case "error":
+          onError(dataStr);
+          stopProcessing = true;
+          return;
+        default:
+          if (dataStr === "[DONE]") {
+            onDone();
+          } else {
+            try {
+              const parsed = JSON.parse(dataStr);
+              if (parsed.routing_verdict) {
+                onRouting(parsed as ChatRoutingInfo);
+              } else if (parsed.content) {
+                onToken(parsed.content || "\n");
+              } else if (parsed.finish_reason) {
+                onDone();
+              }
+            } catch {
+              onToken(dataStr || "\n");
+            }
+          }
+      }
+    };
 
     while (true) {
       const { done, value } = await reader.read();
@@ -119,55 +168,26 @@ async function streamGatewayChat(
 
       for (let line of lines) {
         line = line.replace(/\r$/, "");
-        if (!line) continue;
+
+        if (!line) {
+          if (dataLines.length > 0) {
+            flushEvent();
+            if (stopProcessing) return;
+          }
+          currentEvent = "";
+          dataLines = [];
+          continue;
+        }
 
         if (line.startsWith("event: ")) {
           currentEvent = line.slice(7).trim();
         } else if (line.startsWith("data:")) {
-          const dataStr = line.slice(5).replace(/^ /, "");
-
-          switch (currentEvent) {
-            case "routing": {
-              try {
-                const parsed = JSON.parse(dataStr);
-                onRouting(parsed as ChatRoutingInfo);
-              } catch {
-                // ignore malformed routing
-              }
-              break;
-            }
-            case "token":
-              onToken(dataStr || "\n");
-              break;
-            case "done":
-              onDone();
-              break;
-            case "warning":
-              if (onWarning) onWarning(dataStr);
-              break;
-            case "error":
-              onError(dataStr);
-              return;
-            default:
-                if (dataStr === "[DONE]") {
-                  onDone();
-                } else {
-                  try {
-                    const parsed = JSON.parse(dataStr);
-                    if (parsed.routing_verdict) {
-                      onRouting(parsed as ChatRoutingInfo);
-                    } else if (parsed.content) {
-                      onToken(parsed.content || "\n");
-                    } else if (parsed.finish_reason) {
-                      onDone();
-                    }
-                  } catch {
-                    onToken(dataStr || "\n");
-                  }
-                }
-          }
+          dataLines.push(line.slice(5).replace(/^ /, ""));
         }
       }
+    }
+    if (dataLines.length > 0) {
+      flushEvent();
     }
     onDone();
   } catch (err) {

@@ -206,9 +206,10 @@ docker run -d \
   -p 8000:8000 \
   -v /mnt/models:/models:ro \
   vllm/vllm-openai-rocm:v0.23.0 \
-  --host 0.0.0.0 --port 8000 \
   /models/bottlecapai/ThinkingCap-Qwen3.6-27B \
   --served-model-name bottlecapai/ThinkingCap-Qwen3.6-27B \
+  --host 0.0.0.0 \
+  --port 8000 \
   --max-model-len 16384 \
   --gpu-memory-utilization 0.95 \
   --enforce-eager \
@@ -217,6 +218,8 @@ docker run -d \
 # Watch model load (takes 2-5 minutes)
 docker logs -f vllm
 ```
+
+> **Order matters:** The model path must be the **first positional argument** before any flags. Placing `--host` or other flags before the model path causes a `ValueError` in vLLM 0.25+.
 
 Wait until you see:
 
@@ -398,8 +401,9 @@ docker run -d \
   -p 8000:8000 \
   -v /mnt/models:/models:ro \
   vllm/vllm-openai-rocm:v0.23.0 \
-  --host 0.0.0.0 --port 8000 \
   /models/Qwen/Qwen2.5-32B-Instruct \
+  --host 0.0.0.0 \
+  --port 8000 \
   --max-model-len 32768 \
   --gpu-memory-utilization 0.95 \
   --enforce-eager
@@ -549,9 +553,9 @@ docker run -d \
   --name vllm --restart unless-stopped \
   -p 8000:8000 -v /mnt/models:/models:ro \
   vllm/vllm-openai-rocm:v0.23.0 \
-  --host 0.0.0.0 --port 8000 \
   /models/bottlecapai/ThinkingCap-Qwen3.6-27B \
   --served-model-name bottlecapai/ThinkingCap-Qwen3.6-27B \
+  --host 0.0.0.0 --port 8000 \
   --max-model-len 16384 --gpu-memory-utilization 0.95 \
   --enforce-eager --trust-remote-code
 
