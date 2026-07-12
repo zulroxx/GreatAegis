@@ -5,37 +5,51 @@
 [![Docker](https://img.shields.io/badge/Ready-linux%2Famd64-blue.svg)](#)
 [![FastAPI](https://img.shields.io/badge/FastAPI-v2.0-009688.svg)](#)
 [![React](https://img.shields.io/badge/React-18-61DAFB.svg)](#)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
-> **GreatAegis** is an unbreachable, post-quantum secure AI gateway designed for enterprises. It protects highly sensitive corporate knowledge bases from the "Harvest Now, Decrypt Later" (HNDL) threat while dynamically routing AI workloads using **AMD Instinct GPUs** and the **Fireworks AI API**.
+> **GreatAegis** is a post-quantum secure AI gateway for enterprises. It protects sensitive corporate knowledge bases from the "Harvest Now, Decrypt Later" (HNDL) threat while dynamically routing AI workloads across **AMD Instinct GPUs** and the **Fireworks AI API**.
 
-🔗 **Live Demo URL:** *https://great-aegis.vercel.app/*  
-🎬 **Demo Video:** [Coming Soon]  
-📄 **Pitch Deck:** [Coming Soon]  
+🔗 **Live Demo URL:** *https://great-aegis.vercel.app/*
+🎬 **Demo Video:** *https://drive.google.com/file/d/1PNik3IhQdtvS89ZyaYOsq5PlcWNiBzoV/view?usp=sharing*
+📄 **Pitch Deck:** `/docs/Greataegis pitch deck.pdf
+
+---
+
+## Table of Contents
+
+- [The Problem & Our Solution](#the-problem--our-solution)
+- [Market Opportunity](#market-opportunity)
+- [How We Utilize AMD Compute](#how-we-utilize-amd-compute)
+- [Post-Quantum Cryptography](#post-quantum-cryptography)
+- [Repository Structure](#repository-structure)
+- [Tech Stack](#tech-stack)
+- [API Endpoints](#api-endpoints)
+- [Getting Started](#getting-started-judging-vm--local-setup)
+- [Automated Pre-Screening Compliance](#automated-pre-screening-compliance)
+- [Known Limitations](#known-limitations-out-of-scope-for-poc)
+- [Team](#team)
+- [License](#license)
 
 ---
 
 ## The Problem & Our Solution
-Highly regulated industries (Banking, Healthcare, Government) are blocked from adopting cloud AI due to data sovereignty concerns and the looming threat of Quantum computing breaking current encryption standards.
+
+Highly regulated industries (Banking, Healthcare, Government) are blocked from adopting cloud AI due to data sovereignty concerns and the looming threat of quantum computing breaking current encryption standards.
 
 **GreatAegis** solves this by combining **Zero-Trust Data-in-Transit** with **Secure Compute Pod Isolation**:
+
 1. **Client-Side Post-Quantum Cryptography (PQC):** Prompts and documents are quantum-wrapped directly in the browser using NIST-standard algorithms (ML-KEM-768/Kyber) before they ever hit the network.
 2. **Private AMD Cloud Inference:** Decryption, vector search (RAG), and LLM generation happen *only* inside a secure, locally-hosted AMD Docker environment.
+3. **Hybrid Routing:** Non-sensitive queries are routed to Fireworks AI for speed and cost efficiency, keeping expensive private compute reserved for what actually needs it.
 
-## Future Proof
-### Market Size
+## Market Opportunity
 
-> The enterprise AI gateway market is projected to reach **$12.4B by 2028** (CAGR 35%).
->
-| Segment | TAM | Pain Point |
-|---------|-----|------------|
-| Banking & Fintech | $3.8B | Regulatory compliance (SOX, PCI-DSS) |
-| Healthcare | $2.9B | HIPAA, patient data sovereignty |
-| Government & Defense | $4.1B | Classified data handling, ITAR |
-| Legal | $1.6B | Attorney-client privilege, discovery |
+> For the full business case, market sizing, and go-to-market plan, see the [pitch deck](./docs/pitch-deck.pdf) — kept here as a summary so this README stays focused on the technical submission.
 
-### Revenue Model
-
-> **Three-tier SaaS pricing:**
+- **TAM:** Global post-quantum cryptography market, projected at **$2.84B by 2030** (~46% CAGR).
+- **Beachhead segment:** **44,000+ banks and credit unions worldwide**, ahead of healthcare and government.
+- **Early revenue target:** 5–10 pilot customers in year one at $50K–$100K/year enterprise licensing (~$250K–$1M ARR) — a realistic first-year goal for a small team, not a projection built on an unvalidated market.
+- **Pricing tiers** (illustrative, to be validated with design partners):
 
 | Tier | Price | Features |
 |------|-------|----------|
@@ -43,33 +57,27 @@ Highly regulated industries (Banking, Healthcare, Government) are blocked from a
 | **Vault** | $8,000/mo | + On-prem AMD pod, Qdrant vector store, 50 users |
 | **Citadel** | Custom | + Dedicated Instinct GPU cluster, SLA, air-gap deployment |
 
-> Target: 200 enterprise customers in year 1 → $4.8M ARR. Break-even at month 14.
-
-### Competitive Moat
+### Competitive Positioning
 
 | Competitor | Approach | Gap |
 |------------|----------|-----|
 | Cloudflare AI Gateway | Proxy-only | No PQC, no on-prem option |
-| Azure AI Content Safety | Cloud-only | Data leaves your control |
-| **GreatAegis** | **Zero-trust PQC + Hybrid On-Prem** | **Data never exposed; quantum-safe** |
+| Azure OpenAI Service (private endpoints) | VPC-isolated, cloud-only | No PQC; Nvidia/CUDA-locked; no built-in hybrid routing |
+| **GreatAegis** | **Zero-trust PQC + Hybrid On-Prem on AMD ROCm** | **Data never exposed; quantum-safe; cost-aware routing built in** |
 
-### Go-to-Market
-
-> **Channel partners:** AMD Developer Cloud (hardware bundle), Vercel Marketplace (frontend deployment), AWS/GCP Marketplace (BYO GPU).
->
-> **Initial beachhead:** AMD Developer Hackathon → 10 pilot enterprises → Y Combinator W26 → Series A.
-
----
+> **Note:** private AI hosting alone isn't novel — several vendors offer VPC-isolated inference. The differentiation is the combination of post-quantum encryption, native AMD ROCm acceleration, and built-in hybrid routing, together.
 
 ## How We Utilize AMD Compute
+
 *Automated Evaluator Note: This project heavily relies on AMD hardware and software ecosystems.*
 
 * **Hardware:** We deploy our core backend on an **AMD Developer Cloud** instance utilizing **AMD Instinct GPUs**.
-* **ROCm Acceleration:** Our local open-source LLM is accelerated directly via the **AMD ROCm™ software stack**, ensuring massive parallel processing and ultra-low latency.
+* **ROCm Acceleration:** Our local open-source LLM is accelerated directly via the **AMD ROCm™ software stack**.
 * **Hybrid Routing:** Casual queries are intelligently routed to the **Fireworks AI API** to save compute costs, while sensitive PQC-encrypted documents are strictly routed to our **AMD-powered local inference pod**.
-* **Auto-Failover:** If the AMD pod is unreachable, the gateway automatically engages **SECURE_FALLBACK** — emergency zero-trust routing via client-side encrypted PQC tunnel to Fireworks AI.
+* **Auto-Failover:** If the AMD pod is unreachable, the gateway automatically engages **SECURE_FALLBACK** — emergency zero-trust routing via a client-side encrypted PQC tunnel to Fireworks AI.
 
 ## Post-Quantum Cryptography
+
 GreatAegis implements a defense-in-depth PQC layer:
 
 | Primitive | Algorithm | Standard |
@@ -81,6 +89,7 @@ GreatAegis implements a defense-in-depth PQC layer:
 All encryption and signing happens **client-side in the browser** using WebAssembly-compiled liboqs. Private keys never leave the client device.
 
 ## Repository Structure
+
 ```
 GreatAegis/
 ├── frontend/                    # Vite + React SPA + Tailwind CSS
@@ -111,14 +120,17 @@ GreatAegis/
 │   ├── Dockerfile.inference     # AMD vLLM inference container
 │   └── requirements.txt
 ├── docs/
-│   └── architecture_diagram.png
+│   ├── architecture_diagram.png
+│   └── pitch-deck.pdf
 ├── cloud-init.yaml              # DigitalOcean GPU droplet startup script
 ├── docker-compose.yml           # Orchestrates frontend (3060) + backend (8060)
 ├── vercel.json                  # Vercel deployment config
+├── LICENSE
 └── walkthrough.md
 ```
 
 ## Tech Stack
+
 * **Frontend:** Vite 6, React 18, TypeScript, Tailwind CSS, Recharts
 * **Backend:** FastAPI (Python 3.12), SlowAPI rate-limiting, SSE Starlette
 * **AI / Compute:** AMD ROCm, PyTorch (ROCm build), Fireworks AI API, vLLM
@@ -149,6 +161,7 @@ GreatAegis/
 Our containers are optimized to boot in **under 60 seconds** and are built for `linux/amd64`.
 
 ### Unified Docker Deployment (Recommended)
+
 1. Navigate to the backend directory and set your environment variables:
    - `cd backend`
    - `cp .env.example .env`
@@ -159,6 +172,7 @@ Our containers are optimized to boot in **under 60 seconds** and are built for `
 3. Access the dashboard at **http://localhost:3060** (Backend runs on **http://localhost:8060**).
 
 ### Manual Setup (Alternative)
+
 **Backend:**
 - `cd backend`
 - `pip install -r requirements.txt`
@@ -174,13 +188,32 @@ Two runtime modes are available via the `APP_MODE` env variable:
 - `APP_MODE=production` — real vLLM endpoints, live rocm-smi metrics, real PQC
 
 ## Automated Pre-Screening Compliance
+
 - [x] **AMD Compute Usage:** Validated via ROCm + AMD Developer Cloud deployment.
 - [x] **Container Boot Time:** Starts in < 60 seconds.
 - [x] **Response Time:** < 30 seconds per request.
 - [x] **Architecture:** Docker Image manifested as `linux/amd64`.
 - [x] **Language:** All responses and documentation are in English.
 - [x] **Dynamic Responses:** No hardcoded logic; fully dependent on live AI inference and RAG.
-- [x] **License:** MIT
+- [x] **License:** MIT — see [LICENSE](./LICENSE)
+
+## Known Limitations (Out of Scope for PoC)
+
+- Single-user only, no multi-tenant auth
+- Document sensitivity classification uses keyword/content-aware matching, not a trained ML classifier
+- No production-grade monitoring, rate limiting beyond SlowAPI defaults, or mobile-responsive UI
+- Pricing tiers and revenue targets above are illustrative and not yet validated with paying customers
+
+## Team
+
+| Role | Responsibility |
+|---|---|
+| Team Lead & Full-Stack Developer | End-to-end technical build — AMD Cloud/ROCm setup, FastAPI backend, PQC integration, Vite + React frontend, hybrid routing engine |
+| Pitch Lead & Documentation Manager | Product architecture docs, README, pitch deck, presentation script, GitHub documentation |
+
+## License
+
+This project is licensed under the **MIT License** — see [LICENSE](./LICENSE) for the full text.
 
 ---
 *Built for the AMD Developer Hackathon - Track 3: Unicorn Track*
