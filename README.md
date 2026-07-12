@@ -9,9 +9,9 @@
 
 > **GreatAegis** is a post-quantum secure AI gateway for enterprises. It protects sensitive corporate knowledge bases from the "Harvest Now, Decrypt Later" (HNDL) threat while dynamically routing AI workloads across **AMD Instinct GPUs** and the **Fireworks AI API**.
 
-🔗 **Live Demo URL:** *https://great-aegis.vercel.app/*
-🎬 **Demo Video:** *https://drive.google.com/file/d/1PNik3IhQdtvS89ZyaYOsq5PlcWNiBzoV/view?usp=sharing*
-📄 **Pitch Deck:** `/docs/Greataegis pitch deck.pdf`
+🔗 **Live Demo URL:** *https://great-aegis.vercel.app/*   
+🎬 **Demo Video:** *https://drive.google.com/file/d/1PNik3IhQdtvS89ZyaYOsq5PlcWNiBzoV/view?usp=sharing*   
+📄 **Pitch Deck:** `/docs/Greataegis pitch deck.pdf`   
 
 ---
 
