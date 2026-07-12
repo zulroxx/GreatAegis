@@ -76,6 +76,10 @@ doctl compute droplet create greataegis-gpu \
 
 ## Step 2: Wait for Cloud-Init to Finish
 
+> **Forgot the startup script?** If you created the droplet without pasting `cloud-init.yaml` into the Startup scripts section, the droplet boots as a bare OS — no packages, no model weights, no vLLM. Skip to [Recovery: Manual Setup](#recovery-manual-setup) below.
+
+### Normal cloud-init flow
+
 SSH into the droplet and monitor progress:
 
 ```bash
@@ -108,6 +112,156 @@ Expected vLLM health response:
 ```json
 {"status": "ok", "model": "mistralai/Mixtral-8x7B-Instruct-v0.1", "gpu_count": 1}
 ```
+
+### Recovery: Manual Setup
+
+If you created the droplet **without** the `cloud-init.yaml` startup script, the droplet runs bare Ubuntu GPU — no model weights, no vLLM, no telemetry. You can either **destroy and recreate** the droplet (fastest), or run these steps manually:
+
+**1. SSH in and create the environment file:**
+
+```bash
+ssh root@<droplet-ip>
+
+cat > /etc/vllm.env << 'EOF'
+MODEL_ID='mistralai/Mixtral-8x7B-Instruct-v0.1'
+MODEL_PATH='/mnt/models/mistralai/Mixtral-8x7B-Instruct-v0.1'
+HF_HOME='/mnt/models'
+VLLM_PORT='8000'
+# HF_TOKEN='hf_your_token_here'   # uncomment for gated models
+EOF
+```
+
+**2. Download model weights (10–30 minutes):**
+
+```bash
+. /etc/vllm.env
+mkdir -p /mnt/models
+
+python3 -c "
+from huggingface_hub import snapshot_download
+snapshot_download('${MODEL_ID}', local_dir='${MODEL_PATH}', local_dir_use_symlinks=False)
+"
+```
+
+> If the model is **gated** (Mixtral, Llama, etc.), uncomment and set `HF_TOKEN` in step 1 before running the download.
+
+**3. Create the systemd service files and ROCm metrics server:**
+
+Copy the `write_files` blocks from [`cloud-init.yaml`](../../cloud-init.yaml) into place:
+
+```bash
+# vLLM service
+cat > /etc/systemd/system/vllm.service << 'SVC'
+[Unit]
+Description=GreatAegis vLLM Inference Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+EnvironmentFile=/etc/vllm.env
+WorkingDirectory=/tmp
+ExecStartPre=/bin/sh -c '\
+  if [ ! -d "$${MODEL_PATH}" ]; then \
+    echo "[vllm] FATAL: model directory $${MODEL_PATH} not found"; \
+    exit 1; \
+  fi'
+ExecStart=/bin/bash -c '\
+  exec python3 -m vllm.entrypoints.openai.api_server \
+    --host 0.0.0.0 \
+    --port ${VLLM_PORT} \
+    --model ${MODEL_PATH} \
+    --enforce-eager \
+    --max-num-seqs 64 \
+    --max-model-len 32768 \
+    --gpu-memory-utilization 0.92 \
+    --disable-log-requests'
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+OOMScoreAdjust=-500
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target
+SVC
+
+# ROCm metrics service
+cat > /etc/systemd/system/rocm-metrics.service << 'SVC'
+[Unit]
+Description=GreatAegis ROCm Metrics Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStart=/usr/bin/python3 /usr/local/bin/rocm_metrics_server.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+SVC
+```
+
+Copy the metrics server script from [`cloud-init.yaml`](../../cloud-init.yaml) lines 36–59, or create it:
+
+```bash
+cat > /usr/local/bin/rocm_metrics_server.py << 'PY'
+#!/usr/bin/env python3
+import json, subprocess
+from http.server import HTTPServer, BaseHTTPRequestHandler
+class RocmMetricsHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == "/health":
+            self._respond(200, {"status": "ok"})
+        elif self.path == "/gpu":
+            try:
+                result = subprocess.run(["rocm-smi","-a","--json"],capture_output=True,text=True,timeout=10)
+                if result.returncode != 0:
+                    self._respond(503,{"error":"rocm-smi exited non-zero","stderr":result.stderr.strip()}); return
+                self._respond(200, json.loads(result.stdout))
+            except FileNotFoundError: self._respond(503,{"error":"rocm-smi not found"})
+            except subprocess.TimeoutExpired: self._respond(504,{"error":"rocm-smi timed out"})
+            except json.JSONDecodeError as e: self._respond(502,{"error":f"rocm-smi output not JSON: {e}"})
+            except Exception as e: self._respond(500,{"error":str(e)})
+        else: self._respond(404,{"error":"not found"})
+    def _respond(self, c, p):
+        b = json.dumps(p).encode(); self.send_response(c)
+        self.send_header("Content-Type","application/json"); self.send_header("Content-Length",str(len(b)))
+        self.end_headers(); self.wfile.write(b)
+    def log_message(self, *a): pass
+HTTPServer(("0.0.0.0",8001),RocmMetricsHandler).serve_forever()
+PY
+chmod +x /usr/local/bin/rocm_metrics_server.py
+```
+
+**4. Enable and start both services:**
+
+```bash
+systemctl daemon-reload
+systemctl enable vllm.service
+systemctl start vllm.service
+systemctl enable rocm-metrics.service
+systemctl start rocm-metrics.service
+```
+
+**5. Verify everything works:**
+
+```bash
+systemctl status vllm rocm-metrics
+curl http://localhost:8000/health
+curl http://localhost:8001/gpu | jq .
+```
+
+Once both return `{"status": "ok"}`, continue to [Step 3](#step-3-deploy-the-greataegis-gateway).
 
 ## Step 3: Deploy the GreatAegis Gateway
 
