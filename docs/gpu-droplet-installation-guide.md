@@ -145,13 +145,14 @@ docker rm rocm 2>/dev/null
 
 | Model | Size | Gated? | Notes |
 |-------|------|--------|-------|
+| `nfta80/Qwen3.6-40B-Claude-4.6-Opus-Deckard-Heretic-Uncensored-Thinking-NEO-CODE-Di-IMatrix-MAX-GGUF` | ~40B params (GGUF) | No | Uncensored thinking model, Qwen3.6 architecture, GGUF iMatrix quantization |
 | `bottlecapai/ThinkingCap-Qwen3.6-27B` | ~54 GB (BF16) | No | Great reasoning, token-efficient, Qwen3.5 architecture |
 | `bottlecapai/ThinkingCap-Qwen3.6-27B-FP8` | ~27 GB (FP8) | No | Same model, FP8 quantized — fits even more comfortably |
 | `mistralai/Mixtral-8x7B-Instruct-v0.1` | ~87 GB (BF16) | Yes (HF_TOKEN) | MoE, excellent quality |
 | `Qwen/Qwen2.5-7B-Instruct` | ~14 GB | No | Lightweight, fast, good for testing |
 | `Qwen/Qwen2.5-32B-Instruct` | ~65 GB | No | Strong middle-ground model |
 
-**Recommendation:** Start with `bottlecapai/ThinkingCap-Qwen3.6-27B` — ungated, excellent reasoning quality, token-efficient, and fits well in MI300X memory.
+**Recommendation:** Start with `nfta80/Qwen3.6-40B-Claude-4.6-Opus-Deckard-Heretic-Uncensored-Thinking-NEO-CODE-Di-IMatrix-MAX-GGUF` — uncensored, thinking-capable, GGUF format for efficient memory usage on MI300X.
 
 > **Avoid** `zai-org/GLM-5.2-FP8` — even at FP8 it requires 188+ GB GPU memory and will OOM on a single MI300X (192 GB).
 
@@ -160,22 +161,22 @@ docker rm rocm 2>/dev/null
 The host Python environment is externally managed (PEP 668). Use the vLLM Docker container to download models:
 
 ```bash
-# For ThinkingCap (recommended, ~54 GB)
+# For Qwen3.6-40B Heretic GGUF (recommended, uncensored thinking model)
+docker run --rm --entrypoint python3 \
+  -v /mnt/models:/models \
+  vllm/vllm-openai-rocm:v0.23.0 \
+  -c "
+from huggingface_hub import snapshot_download
+snapshot_download('nfta80/Qwen3.6-40B-Claude-4.6-Opus-Deckard-Heretic-Uncensored-Thinking-NEO-CODE-Di-IMatrix-MAX-GGUF', local_dir='/models/nfta80/Qwen3.6-40B-Claude-4.6-Opus-Deckard-Heretic-Uncensored-Thinking-NEO-CODE-Di-IMatrix-MAX-GGUF', local_dir_use_symlinks=False)
+"
+
+# Or the ThinkingCap BF16 variant (~54 GB)
 docker run --rm --entrypoint python3 \
   -v /mnt/models:/models \
   vllm/vllm-openai-rocm:v0.23.0 \
   -c "
 from huggingface_hub import snapshot_download
 snapshot_download('bottlecapai/ThinkingCap-Qwen3.6-27B', local_dir='/models/bottlecapai/ThinkingCap-Qwen3.6-27B', local_dir_use_symlinks=False)
-"
-
-# Or the FP8 variant (~27 GB, half the memory)
-docker run --rm --entrypoint python3 \
-  -v /mnt/models:/models \
-  vllm/vllm-openai-rocm:v0.23.0 \
-  -c "
-from huggingface_hub import snapshot_download
-snapshot_download('bottlecapai/ThinkingCap-Qwen3.6-27B-FP8', local_dir='/models/bottlecapai/ThinkingCap-Qwen3.6-27B-FP8', local_dir_use_symlinks=False)
 "
 ```
 
@@ -206,8 +207,9 @@ docker run -d \
   -p 8000:8000 \
   -v /mnt/models:/models:ro \
   vllm/vllm-openai-rocm:v0.23.0 \
-  /models/bottlecapai/ThinkingCap-Qwen3.6-27B \
-  --served-model-name bottlecapai/ThinkingCap-Qwen3.6-27B \
+  /models/nfta80/Qwen3.6-40B-Claude-4.6-Opus-Deckard-Heretic-Uncensored-Thinking-NEO-CODE-Di-IMatrix-MAX-GGUF \
+  --served-model-name nfta80/Qwen3.6-40B-Claude-4.6-Opus-Deckard-Heretic-Uncensored-Thinking-NEO-CODE-Di-IMatrix-MAX-GGUF \
+  --model-format gguf \
   --host 0.0.0.0 \
   --port 8000 \
   --max-model-len 16384 \
@@ -236,7 +238,7 @@ curl -s http://localhost:8000/health
 Expected:
 
 ```json
-{"status": "ok", "model": "/models/bottlecapai/ThinkingCap-Qwen3.6-27B"}
+{"status": "ok", "model": "/models/nfta80/Qwen3.6-40B-Claude-4.6-Opus-Deckard-Heretic-Uncensored-Thinking-NEO-CODE-Di-IMatrix-MAX-GGUF"}
 ```
 
 ### Key Flags Explained
@@ -312,7 +314,7 @@ Edit `backend/.env`:
 APP_MODE=production
 FIREWORKS_API_KEY=fw_xxxxxxxxxxx
 VLLM_ENDPOINT=http://<droplet-ip>:8000/v1/chat/completions
-VLLM_MODEL_NAME=bottlecapai/ThinkingCap-Qwen3.6-27B
+VLLM_MODEL_NAME=nfta80/Qwen3.6-40B-Claude-4.6-Opus-Deckard-Heretic-Uncensored-Thinking-NEO-CODE-Di-IMatrix-MAX-GGUF
 ROCM_SMI_URL=http://<droplet-ip>:8001/gpu
 ```
 
@@ -409,7 +411,7 @@ docker run -d \
   --enforce-eager
 
 # Update gateway .env
-# VLLM_MODEL_NAME=Qwen/Qwen2.5-32B-Instruct
+# VLLM_MODEL_NAME=nfta80/Qwen3.6-40B-Claude-4.6-Opus-Deckard-Heretic-Uncensored-Thinking-NEO-CODE-Di-IMatrix-MAX-GGUF
 ```
 
 ## Disk Space Best Practices
@@ -542,7 +544,7 @@ docker run --rm --entrypoint python3 \
   vllm/vllm-openai-rocm:v0.23.0 \
   -c "
 from huggingface_hub import snapshot_download
-snapshot_download('bottlecapai/ThinkingCap-Qwen3.6-27B', local_dir='/models/bottlecapai/ThinkingCap-Qwen3.6-27B', local_dir_use_symlinks=False)
+snapshot_download('nfta80/Qwen3.6-40B-Claude-4.6-Opus-Deckard-Heretic-Uncensored-Thinking-NEO-CODE-Di-IMatrix-MAX-GGUF', local_dir='/models/nfta80/Qwen3.6-40B-Claude-4.6-Opus-Deckard-Heretic-Uncensored-Thinking-NEO-CODE-Di-IMatrix-MAX-GGUF', local_dir_use_symlinks=False)
 "
 
 # 5. Start vLLM
@@ -553,8 +555,9 @@ docker run -d \
   --name vllm --restart unless-stopped \
   -p 8000:8000 -v /mnt/models:/models:ro \
   vllm/vllm-openai-rocm:v0.23.0 \
-  /models/bottlecapai/ThinkingCap-Qwen3.6-27B \
-  --served-model-name bottlecapai/ThinkingCap-Qwen3.6-27B \
+  /models/nfta80/Qwen3.6-40B-Claude-4.6-Opus-Deckard-Heretic-Uncensored-Thinking-NEO-CODE-Di-IMatrix-MAX-GGUF \
+  --served-model-name nfta80/Qwen3.6-40B-Claude-4.6-Opus-Deckard-Heretic-Uncensored-Thinking-NEO-CODE-Di-IMatrix-MAX-GGUF \
+  --model-format gguf \
   --host 0.0.0.0 --port 8000 \
   --max-model-len 16384 --gpu-memory-utilization 0.95 \
   --enforce-eager --trust-remote-code

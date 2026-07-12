@@ -83,6 +83,8 @@ def get_model_usage() -> list[dict]:
         "accounts/fireworks/models/deepseek-v4-pro": "DeepSeek V4 Pro",
         "accounts/fireworks/models/qwen3p7-plus": "Qwen 3.7 Plus",
         "accounts/fireworks/models/gpt-oss-120b": "GPT-OSS-120B",
+        "nfta80/Qwen3.6-40B-Claude-4.6-Opus-Deckard-Heretic-Uncensored-Thinking-NEO-CODE-Di-IMatrix-MAX-GGUF": "Qwen3.6-40B Heretic (AMD Pod)",
+        "deepseek-ai/DeepSeek-R1": "DeepSeek-R1 671B (AMD Pod)",
         "private_route": "Private Route (AMD Secure Pod)",
         "Fireworks AI (Encrypted Tunnel Fallback)": "Fireworks AI (Fallback)",
     }

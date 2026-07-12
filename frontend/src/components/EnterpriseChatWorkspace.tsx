@@ -20,6 +20,7 @@ import { extractTextFromFile } from "../utils/fileTextExtractor";
 import { encapsulatePrompt } from "../utils/pqc-client";
 import { apiFetch } from "../utils/api";
 
+
 const SUGGESTIONS = [
   "Explain quantum-resistant cryptography in simple terms",
   "Write a Python function that validates JWT tokens",
@@ -378,8 +379,17 @@ export default function EnterpriseChatWorkspace() {
 
     const selectedModel = localStorage.getItem(MODEL_STORAGE_KEY) || undefined;
 
-    let fullContent = "";
+    let accumulatedContent = "";
     const latest = { current: newMessages };
+
+    const syncMessage = () => {
+      const updated = updateMessageById(latest.current, assistantId, (m) => ({
+        ...m,
+        content: accumulatedContent,
+      }));
+      latest.current = updated;
+      updateMessages(convId, updated);
+    };
 
     // Build history for context: previous user + assistant messages
     const baseHistory = baseMessages;
@@ -399,12 +409,11 @@ export default function EnterpriseChatWorkspace() {
         updateMessages(convId, updated);
       },
       (token) => {
-        fullContent += token;
-        const updated = updateMessageById(latest.current, assistantId, (m) => ({ ...m, content: fullContent }));
-        latest.current = updated;
-        updateMessages(convId, updated);
+        accumulatedContent += token;
+        syncMessage();
       },
       () => {
+        syncMessage();
         setStreaming(false);
       },
       (err) => {
@@ -427,7 +436,7 @@ export default function EnterpriseChatWorkspace() {
       selectedModel,
       historyMessages,
       historyRoutingVerdicts,
-      activeConversationId,
+      activeConversationId ?? undefined,
     );
   }, [input, streaming, activeConversationId, conversations, createConversation, updateMessages]);
 

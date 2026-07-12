@@ -113,7 +113,7 @@ VLLM_ENDPOINTS: dict[str, str] = {
 }
 
 VLLM_MODEL_NAMES: dict[str, str] = {
-    "private_route": os.environ.get("VLLM_MODEL_NAME", "ThinkingCap"),
+    "private_route": os.environ.get("VLLM_MODEL_NAME", "deepseek-ai/DeepSeek-R1"),
 }
 
 # ── Server-side API key storage (in-memory only, never persisted) ────────────
@@ -1438,9 +1438,9 @@ async def _simulate_private_response(model_name: str, prompt: str, temperature: 
     labelled as simulated so the user knows no real AMD GPU served it.
     """
     import asyncio
-    import re
 
     model_label = "Private Route (AMD Secure Pod)"
+
     header = (
         f"[Processed on {model_label} — private compute pod (simulated)]\n"
         "Your prompt was classified as sensitive and routed to the private AMD pod.\n"
@@ -1493,6 +1493,7 @@ async def gateway_chat_stream(
       event: routing    → {verdict, model, reason, encryption, etc.}
       event: token      → {content: "..."}
       event: done       → {finish_reason: "stop"}
+      event: warning    → human-readable warning string
       event: error      → {detail: "..."}
     """
     # ── 1. Privilege-escalation guard ──────────────────────────────────
