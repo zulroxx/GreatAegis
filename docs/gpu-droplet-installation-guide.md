@@ -117,10 +117,12 @@ Expected vLLM health response:
 
 If you created the droplet **without** the `cloud-init.yaml` startup script, the droplet runs bare Ubuntu GPU — no model weights, no vLLM, no telemetry. You can either **destroy and recreate** the droplet (fastest), or run these steps manually:
 
-**1. SSH in and create the environment file:**
+**1. SSH in, install prerequisites, and create the environment file:**
 
 ```bash
 ssh root@<droplet-ip>
+
+pip install --break-system-packages huggingface_hub vllm
 
 cat > /etc/vllm.env << 'EOF'
 MODEL_ID='mistralai/Mixtral-8x7B-Instruct-v0.1'

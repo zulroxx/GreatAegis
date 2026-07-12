@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import rehypeSanitize from "rehype-sanitize";
 import {
   Send,
@@ -696,7 +697,7 @@ export default function EnterpriseChatWorkspace() {
                   {msg.content ? (
                     msg.role === "assistant" ? (
                       <div className="prose prose-sm max-w-none" style={{ color: "var(--color-text-primary)" }}>
-                        <ReactMarkdown rehypePlugins={[rehypeSanitize]} components={markdownComponents}>{msg.content}</ReactMarkdown>
+                        <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]} components={markdownComponents}>{msg.content}</ReactMarkdown>
                       </div>
                     ) : (
                       msg.content
@@ -959,6 +960,55 @@ const markdownComponents = {
       >
         {children}
       </code>
+    );
+  },
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  table({ children, ...props }: any) {
+    return (
+      <div style={{ overflowX: "auto", marginTop: "0.75rem", marginBottom: "0.75rem" }}>
+        <table
+          style={{
+            width: "100%",
+            borderCollapse: "collapse",
+            fontSize: "0.85em",
+          }}
+          {...props}
+        >
+          {children}
+        </table>
+      </div>
+    );
+  },
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  th({ children, ...props }: any) {
+    return (
+      <th
+        style={{
+          padding: "0.5rem 0.75rem",
+          border: "1px solid var(--color-border-default)",
+          textAlign: "left",
+          background: "var(--color-bg-input)",
+          fontWeight: 600,
+        }}
+        {...props}
+      >
+        {children}
+      </th>
+    );
+  },
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  td({ children, ...props }: any) {
+    return (
+      <td
+        style={{
+          padding: "0.5rem 0.75rem",
+          border: "1px solid var(--color-border-default)",
+          textAlign: "left",
+        }}
+        {...props}
+      >
+        {children}
+      </td>
     );
   },
 };
