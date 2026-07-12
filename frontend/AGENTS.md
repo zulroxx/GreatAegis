@@ -18,3 +18,4 @@
 - No `next/` imports — this is NOT a Next.js project.
 - Use `apiFetch` from `utils/api` for all backend calls.
 - Use inline styles (`style={{}}`) with CSS variables, not Tailwind classes for colors.
+- When outputting markdown tables, always place each row on its own line (header, separator, and each data row). Never collapse table rows onto a single line.
