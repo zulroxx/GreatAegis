@@ -122,7 +122,7 @@ GreatAegis/
 │   └── requirements.txt
 ├── docs/
 │   ├── architecture_diagram.png
-│   └── pitch-deck.pdf
+│   └── Greataegis pitch-deck.pdf
 ├── cloud-init.yaml              # Startup script for AMD Instinct GPU droplet (AMD Developer Cloud, provisioned via DigitalOcean)
 ├── docker-compose.yml           # Orchestrates frontend (3060) + backend (8060)
 ├── vercel.json                  # Vercel deployment config
