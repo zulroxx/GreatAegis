@@ -11,7 +11,7 @@
 
 🔗 **Live Demo URL:** *https://great-aegis.vercel.app/*
 🎬 **Demo Video:** *https://drive.google.com/file/d/1PNik3IhQdtvS89ZyaYOsq5PlcWNiBzoV/view?usp=sharing*
-📄 **Pitch Deck:** `/docs/Greataegis pitch deck.pdf
+📄 **Pitch Deck:** `/docs/Greataegis pitch deck.pdf`
 
 ---
 
@@ -25,6 +25,7 @@
 - [Tech Stack](#tech-stack)
 - [API Endpoints](#api-endpoints)
 - [Getting Started](#getting-started-judging-vm--local-setup)
+  - [Environment Variables](#environment-variables)
 - [Automated Pre-Screening Compliance](#automated-pre-screening-compliance)
 - [Known Limitations](#known-limitations-out-of-scope-for-poc)
 - [Team](#team)
@@ -71,7 +72,7 @@ Highly regulated industries (Banking, Healthcare, Government) are blocked from a
 
 *Automated Evaluator Note: This project heavily relies on AMD hardware and software ecosystems.*
 
-* **Hardware:** We deploy our core backend on an **AMD Developer Cloud** instance utilizing **AMD Instinct GPUs**.
+* **Hardware:** We deploy our core backend on an **AMD Developer Cloud** instance utilizing **AMD Instinct GPUs**, provisioned via a DigitalOcean AMD Instinct GPU droplet (see `cloud-init.yaml`).
 * **ROCm Acceleration:** Our local open-source LLM is accelerated directly via the **AMD ROCm™ software stack**.
 * **Hybrid Routing:** Casual queries are intelligently routed to the **Fireworks AI API** to save compute costs, while sensitive PQC-encrypted documents are strictly routed to our **AMD-powered local inference pod**.
 * **Auto-Failover:** If the AMD pod is unreachable, the gateway automatically engages **SECURE_FALLBACK** — emergency zero-trust routing via a client-side encrypted PQC tunnel to Fireworks AI.
@@ -122,7 +123,7 @@ GreatAegis/
 ├── docs/
 │   ├── architecture_diagram.png
 │   └── pitch-deck.pdf
-├── cloud-init.yaml              # DigitalOcean GPU droplet startup script
+├── cloud-init.yaml              # Startup script for AMD Instinct GPU droplet (AMD Developer Cloud, provisioned via DigitalOcean)
 ├── docker-compose.yml           # Orchestrates frontend (3060) + backend (8060)
 ├── vercel.json                  # Vercel deployment config
 ├── LICENSE
@@ -186,6 +187,31 @@ Our containers are optimized to boot in **under 60 seconds** and are built for `
 Two runtime modes are available via the `APP_MODE` env variable:
 - `APP_MODE=simulated` (default) — mock traffic & GPU telemetry
 - `APP_MODE=production` — real vLLM endpoints, live rocm-smi metrics, real PQC
+
+### Environment Variables
+
+Required variables in `backend/.env` (see `backend/.env.example` for the full template):
+
+```env
+# Runtime mode
+APP_MODE=simulated              # or "production"
+
+# Fireworks AI (public routing path)
+FIREWORKS_API_KEY=
+
+# AMD / ROCm / vLLM (private routing path)
+VLLM_ENDPOINT=
+ROCM_DEVICE=
+
+# Vector database (Qdrant)
+VECTOR_DB_URL=
+VECTOR_DB_API_KEY=
+
+# PQC key storage
+PQC_KEY_STORE_PATH=
+```
+
+> Variable names above match the current `.env.example` — if your local template differs, defer to the file in the repo as the source of truth.
 
 ## Automated Pre-Screening Compliance
 
