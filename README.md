@@ -11,7 +11,7 @@
 
 🔗 **Live Demo URL:** *https://great-aegis.vercel.app/*
 🎬 **Demo Video:** *https://drive.google.com/file/d/1PNik3IhQdtvS89ZyaYOsq5PlcWNiBzoV/view?usp=sharing*
-📄 **Pitch Deck:** `/docs/Greataegis pitch deck.pdf
+📄 **Pitch Deck:** `/docs/Greataegis pitch deck.pdf`
 
 ---
 
@@ -121,8 +121,8 @@ GreatAegis/
 │   └── requirements.txt
 ├── docs/
 │   ├── architecture_diagram.png
-│   └── pitch-deck.pdf
-├── cloud-init.yaml              # DigitalOcean GPU droplet startup script
+│   └── Greataegis pitch-deck.pdf
+├── cloud-init.yaml              # Startup script for AMD Instinct GPU droplet (AMD Developer Cloud, provisioned via DigitalOcean)
 ├── docker-compose.yml           # Orchestrates frontend (3060) + backend (8060)
 ├── vercel.json                  # Vercel deployment config
 ├── LICENSE
@@ -186,6 +186,31 @@ Our containers are optimized to boot in **under 60 seconds** and are built for `
 Two runtime modes are available via the `APP_MODE` env variable:
 - `APP_MODE=simulated` (default) — mock traffic & GPU telemetry
 - `APP_MODE=production` — real vLLM endpoints, live rocm-smi metrics, real PQC
+
+### Environment Variables
+
+Required variables in `backend/.env` (see `backend/.env.example` for the full template):
+
+```env
+# Runtime mode
+APP_MODE=simulated              # or "production"
+
+# Fireworks AI (public routing path)
+FIREWORKS_API_KEY=
+
+# AMD / ROCm / vLLM (private routing path)
+VLLM_ENDPOINT=
+ROCM_DEVICE=
+
+# Vector database (Qdrant)
+VECTOR_DB_URL=
+VECTOR_DB_API_KEY=
+
+# PQC key storage
+PQC_KEY_STORE_PATH=
+```
+
+> Variable names above match the current `.env.example` — if your local template differs, defer to the file in the repo as the source of truth.
 
 ## Automated Pre-Screening Compliance
 
