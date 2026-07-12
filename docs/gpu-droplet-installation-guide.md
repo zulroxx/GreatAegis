@@ -208,6 +208,7 @@ docker run -d \
   vllm/vllm-openai-rocm:v0.23.0 \
   --host 0.0.0.0 --port 8000 \
   /models/bottlecapai/ThinkingCap-Qwen3.6-27B \
+  --served-model-name bottlecapai/ThinkingCap-Qwen3.6-27B \
   --max-model-len 16384 \
   --gpu-memory-utilization 0.95 \
   --enforce-eager \
@@ -550,6 +551,7 @@ docker run -d \
   vllm/vllm-openai-rocm:v0.23.0 \
   --host 0.0.0.0 --port 8000 \
   /models/bottlecapai/ThinkingCap-Qwen3.6-27B \
+  --served-model-name bottlecapai/ThinkingCap-Qwen3.6-27B \
   --max-model-len 16384 --gpu-memory-utilization 0.95 \
   --enforce-eager --trust-remote-code
 
