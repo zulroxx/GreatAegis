@@ -11,7 +11,7 @@
 
 🔗 **Live Demo URL:** *https://great-aegis.vercel.app/*   
 🎬 **Demo Video:** *https://drive.google.com/file/d/1PNik3IhQdtvS89ZyaYOsq5PlcWNiBzoV/view?usp=sharing*   
-📄 **Pitch Deck:** `/docs/Greataegis pitch deck.pdf` || `https://canva.link/e1y9pgzd5tttl63`   
+📄 **Pitch Deck:** `/docs/Greataegis pitch deck.pdf` || [canva link](`https://canva.link/e1y9pgzd5tttl63`)   
 
 ---
 
