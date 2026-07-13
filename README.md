@@ -11,7 +11,7 @@
 
 🔗 **Live Demo URL:** *https://great-aegis.vercel.app/*   
 🎬 **Demo Video:** *https://drive.google.com/file/d/1PNik3IhQdtvS89ZyaYOsq5PlcWNiBzoV/view?usp=sharing*   
-📄 **Pitch Deck:** `/docs/Greataegis pitch deck.pdf`   
+📄 **Pitch Deck:** `/docs/Greataegis pitch deck.pdf` || `https://canva.link/e1y9pgzd5tttl63`   
 
 ---
 
@@ -44,7 +44,7 @@ Highly regulated industries (Banking, Healthcare, Government) are blocked from a
 
 ## Market Opportunity
 
-> For the full business case, market sizing, and go-to-market plan, see the [pitch deck](./docs/pitch-deck.pdf) — kept here as a summary so this README stays focused on the technical submission.
+> For the full business case, market sizing, and go-to-market plan, see the [pitch deck](https://canva.link/e1y9pgzd5tttl63) — kept here as a summary so this README stays focused on the technical submission.
 
 - **TAM:** Global post-quantum cryptography market, projected at **$2.84B by 2030** (~46% CAGR).
 - **Beachhead segment:** **44,000+ banks and credit unions worldwide**, ahead of healthcare and government.
