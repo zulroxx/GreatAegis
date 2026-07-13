@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import rehypeSanitize from "rehype-sanitize";
 import {
   Send,
@@ -18,6 +19,7 @@ import { useChatHistory } from "../contexts/ChatHistoryContext";
 import { extractTextFromFile } from "../utils/fileTextExtractor";
 import { encapsulatePrompt } from "../utils/pqc-client";
 import { apiFetch } from "../utils/api";
+
 
 const SUGGESTIONS = [
   "Explain quantum-resistant cryptography in simple terms",
@@ -107,6 +109,55 @@ async function streamGatewayChat(
     const decoder = new TextDecoder();
     let buffer = "";
     let currentEvent = "";
+    let dataLines: string[] = [];
+    let stopProcessing = false;
+
+    const flushEvent = () => {
+      if (dataLines.length === 0) return;
+      const dataStr = dataLines.join("\n");
+
+      switch (currentEvent) {
+        case "routing": {
+          try {
+            const parsed = JSON.parse(dataStr);
+            onRouting(parsed as ChatRoutingInfo);
+          } catch {
+            // ignore malformed routing
+          }
+          break;
+        }
+        case "token":
+          onToken(dataStr || "\n");
+          break;
+        case "done":
+          onDone();
+          break;
+        case "warning":
+          if (onWarning) onWarning(dataStr);
+          break;
+        case "error":
+          onError(dataStr);
+          stopProcessing = true;
+          return;
+        default:
+          if (dataStr === "[DONE]") {
+            onDone();
+          } else {
+            try {
+              const parsed = JSON.parse(dataStr);
+              if (parsed.routing_verdict) {
+                onRouting(parsed as ChatRoutingInfo);
+              } else if (parsed.content) {
+                onToken(parsed.content || "\n");
+              } else if (parsed.finish_reason) {
+                onDone();
+              }
+            } catch {
+              onToken(dataStr || "\n");
+            }
+          }
+      }
+    };
 
     while (true) {
       const { done, value } = await reader.read();
@@ -118,55 +169,26 @@ async function streamGatewayChat(
 
       for (let line of lines) {
         line = line.replace(/\r$/, "");
-        if (!line) continue;
+
+        if (!line) {
+          if (dataLines.length > 0) {
+            flushEvent();
+            if (stopProcessing) return;
+          }
+          currentEvent = "";
+          dataLines = [];
+          continue;
+        }
 
         if (line.startsWith("event: ")) {
           currentEvent = line.slice(7).trim();
         } else if (line.startsWith("data:")) {
-          const dataStr = line.slice(5).replace(/^ /, "");
-
-          switch (currentEvent) {
-            case "routing": {
-              try {
-                const parsed = JSON.parse(dataStr);
-                onRouting(parsed as ChatRoutingInfo);
-              } catch {
-                // ignore malformed routing
-              }
-              break;
-            }
-            case "token":
-              onToken(dataStr || "\n");
-              break;
-            case "done":
-              onDone();
-              break;
-            case "warning":
-              if (onWarning) onWarning(dataStr);
-              break;
-            case "error":
-              onError(dataStr);
-              return;
-            default:
-                if (dataStr === "[DONE]") {
-                  onDone();
-                } else {
-                  try {
-                    const parsed = JSON.parse(dataStr);
-                    if (parsed.routing_verdict) {
-                      onRouting(parsed as ChatRoutingInfo);
-                    } else if (parsed.content) {
-                      onToken(parsed.content || "\n");
-                    } else if (parsed.finish_reason) {
-                      onDone();
-                    }
-                  } catch {
-                    onToken(dataStr || "\n");
-                  }
-                }
-          }
+          dataLines.push(line.slice(5).replace(/^ /, ""));
         }
       }
+    }
+    if (dataLines.length > 0) {
+      flushEvent();
     }
     onDone();
   } catch (err) {
@@ -357,8 +379,17 @@ export default function EnterpriseChatWorkspace() {
 
     const selectedModel = localStorage.getItem(MODEL_STORAGE_KEY) || undefined;
 
-    let fullContent = "";
+    let accumulatedContent = "";
     const latest = { current: newMessages };
+
+    const syncMessage = () => {
+      const updated = updateMessageById(latest.current, assistantId, (m) => ({
+        ...m,
+        content: accumulatedContent,
+      }));
+      latest.current = updated;
+      updateMessages(convId, updated);
+    };
 
     // Build history for context: previous user + assistant messages
     const baseHistory = baseMessages;
@@ -378,12 +409,11 @@ export default function EnterpriseChatWorkspace() {
         updateMessages(convId, updated);
       },
       (token) => {
-        fullContent += token;
-        const updated = updateMessageById(latest.current, assistantId, (m) => ({ ...m, content: fullContent }));
-        latest.current = updated;
-        updateMessages(convId, updated);
+        accumulatedContent += token;
+        syncMessage();
       },
       () => {
+        syncMessage();
         setStreaming(false);
       },
       (err) => {
@@ -406,7 +436,7 @@ export default function EnterpriseChatWorkspace() {
       selectedModel,
       historyMessages,
       historyRoutingVerdicts,
-      activeConversationId,
+      activeConversationId ?? undefined,
     );
   }, [input, streaming, activeConversationId, conversations, createConversation, updateMessages]);
 
@@ -696,7 +726,7 @@ export default function EnterpriseChatWorkspace() {
                   {msg.content ? (
                     msg.role === "assistant" ? (
                       <div className="prose prose-sm max-w-none" style={{ color: "var(--color-text-primary)" }}>
-                        <ReactMarkdown rehypePlugins={[rehypeSanitize]} components={markdownComponents}>{msg.content}</ReactMarkdown>
+                        <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]} components={markdownComponents}>{msg.content}</ReactMarkdown>
                       </div>
                     ) : (
                       msg.content
@@ -959,6 +989,55 @@ const markdownComponents = {
       >
         {children}
       </code>
+    );
+  },
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  table({ children, ...props }: any) {
+    return (
+      <div style={{ overflowX: "auto", marginTop: "0.75rem", marginBottom: "0.75rem" }}>
+        <table
+          style={{
+            width: "100%",
+            borderCollapse: "collapse",
+            fontSize: "0.85em",
+          }}
+          {...props}
+        >
+          {children}
+        </table>
+      </div>
+    );
+  },
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  th({ children, ...props }: any) {
+    return (
+      <th
+        style={{
+          padding: "0.5rem 0.75rem",
+          border: "1px solid var(--color-border-default)",
+          textAlign: "left",
+          background: "var(--color-bg-input)",
+          fontWeight: 600,
+        }}
+        {...props}
+      >
+        {children}
+      </th>
+    );
+  },
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  td({ children, ...props }: any) {
+    return (
+      <td
+        style={{
+          padding: "0.5rem 0.75rem",
+          border: "1px solid var(--color-border-default)",
+          textAlign: "left",
+        }}
+        {...props}
+      >
+        {children}
+      </td>
     );
   },
 };
